@@ -1,0 +1,14 @@
+{
+  "extends": ["react-app"],
+  "env": {
+    "browser": true,
+    "es2021": true
+  },
+  "globals": {
+    "BigInt": "readonly"
+  },
+  "rules": {
+    "no-undef": "off",
+    "no-unused-vars": "off"
+  }
+}
