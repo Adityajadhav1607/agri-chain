@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { signInWithEthereum, MetaMaskNotFoundError } from "../utils/auth";
 
-export default function LoginPage({ onLogin, onRegister, onAdmin }) {
+export default function LoginPage({ onLogin, onRegister, onAdmin, onBack }) {
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState(null);
   const [step,       setStep]       = useState("idle");
@@ -51,8 +51,29 @@ export default function LoginPage({ onLogin, onRegister, onAdmin }) {
       background:"linear-gradient(135deg,#f0f7f0 0%,#e8f5ee 50%,#f4f6f0 100%)",
       display:"flex", flexDirection:"column",
       alignItems:"center", justifyContent:"center",
-      padding:"24px", fontFamily:"'Segoe UI',sans-serif"
+      padding:"24px", fontFamily:"'Segoe UI',sans-serif",
+      position:"relative"
     }}>
+
+      {/* ← Back to Home — top-left */}
+      <button
+        onClick={onBack}
+        style={{
+          position:"absolute", top:"20px", left:"20px",
+          background:"rgba(26,107,58,0.08)",
+          border:"1px solid rgba(26,107,58,0.18)",
+          borderRadius:"10px", padding:"7px 16px",
+          fontSize:"13px", fontWeight:"600", color:"#1a6b3a",
+          cursor:"pointer", fontFamily:"inherit",
+          display:"flex", alignItems:"center", gap:"6px",
+          transition:"all 0.2s",
+        }}
+        onMouseOver={e => { e.currentTarget.style.background="rgba(26,107,58,0.15)"; e.currentTarget.style.transform="translateX(-2px)"; }}
+        onMouseOut={e => { e.currentTarget.style.background="rgba(26,107,58,0.08)"; e.currentTarget.style.transform=""; }}
+      >
+        ← Back to Home
+      </button>
+
       {/* Hero */}
       <div style={{ textAlign:"center", marginBottom:"32px" }}>
         <div style={{ fontSize:"52px", marginBottom:"12px" }}>🌾</div>

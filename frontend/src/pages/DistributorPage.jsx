@@ -3,36 +3,57 @@ import { ethers } from "ethers";
 import TrackTransferABI   from "../utils/TrackTransfer.json";
 import ProduceRegistryABI from "../utils/ProduceRegistry.json";
 import { TRACKER_ADDRESS, REGISTRY_ADDRESS } from "../utils/addresses";
+import { toastSuccess, toastError, toastLoading, toastDismiss } from "../utils/toast";
+import Confetti from "../components/Confetti";
 
 const STATUS_LABELS = ["Registered","In Transit","Quality Checked","Delivered","Rejected"];
 const STATUS_COLORS = ["#e8f5ee","#fef3c7","#eff6ff","#d1fae5","#fee2e2"];
 const STATUS_TEXT   = ["#1a6b3a","#92400e","#1e40af","#065f46","#991b1b"];
 
+function SkeletonRow({ cols = 6 }) {
+  return (
+    <tr>
+      {Array.from({ length: cols }).map((_, i) => (
+        <td key={i}>
+          <div style={{ height: "14px", borderRadius: "6px", background: "linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s ease infinite" }} />
+        </td>
+      ))}
+    </tr>
+  );
+}
+
 export default function DistributorPage({ account }) {
   const [tab, setTab]     = useState("transfer");
   const [form, setForm]   = useState({ batchId: "", retailerAddr: "", location: "", temp: "10", transport: "0" });
   const [loading, setLoading] = useState(false);
-  const [result,  setResult]  = useState(null);
   const [batches, setBatches] = useState([]);
   const [loadingBatches, setLoadingBatches] = useState(false);
+  const [confetti, setConfetti] = useState(false);
 
   const handle = e => setForm({ ...form, [e.target.name]: e.target.value });
 
   async function transferToRetailer() {
-    if (!form.batchId) { setResult({ type: "error", msg: "Enter Batch ID" }); return; }
-    if (!ethers.isAddress(form.retailerAddr)) { setResult({ type: "error", msg: "Enter a valid retailer wallet address" }); return; }
+    if (!form.batchId) { toastError("Enter Batch ID"); return; }
+    if (!ethers.isAddress(form.retailerAddr)) { toastError("Enter a valid retailer wallet address"); return; }
+    const tid = toastLoading("Waiting for MetaMask confirmation...");
     try {
-      setLoading(true); setResult(null);
+      setLoading(true);
       const provider = new ethers.BrowserProvider(window.ethereum);
       await provider.send("eth_requestAccounts", []);
       const signer   = await provider.getSigner();
       const contract = new ethers.Contract(TRACKER_ADDRESS, TrackTransferABI.abi, signer);
       const tx = await contract.logTransfer(BigInt(form.batchId), form.retailerAddr, parseInt(form.transport), parseInt(form.temp), form.location || "Distribution Center", "Transferred to retailer");
+      toastDismiss(tid);
+      toastLoading("Transaction submitted — waiting for block confirmation...");
       await tx.wait();
-      setResult({ type: "success", msg: `✅ Batch #${form.batchId} delivered to retailer! Tx: ${tx.hash.slice(0,22)}...` });
+      toastDismiss(tid);
+      toastSuccess(`✅ Batch #${form.batchId} delivered to retailer!`);
+      setConfetti(true);
+      setTimeout(() => setConfetti(false), 3600);
       setForm({ batchId: "", retailerAddr: "", location: "", temp: "10", transport: "0" });
     } catch (e) {
-      setResult({ type: "error", msg: e.reason || e.message });
+      toastDismiss(tid);
+      toastError(e.reason || e.message || "Transaction failed.");
     } finally { setLoading(false); }
   }
 
@@ -52,14 +73,17 @@ export default function DistributorPage({ account }) {
         status:       Number(b.status),
         farmer:       b.farmer.slice(0,10) + "...",
       })));
-    } catch (e) { console.error(e); }
+    } catch (e) { toastError("Failed to load batches."); console.error(e); }
     finally { setLoadingBatches(false); }
   }, [account]);
 
-  function handleTabChange(t) { setTab(t); setResult(null); if (t === "batches") loadMyBatches(); }
+  function handleTabChange(t) { setTab(t); if (t === "batches") loadMyBatches(); }
 
   return (
     <div>
+      <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
+      <Confetti active={confetti} />
+
       <div style={{ marginBottom: "16px", display: "flex", gap: "8px" }}>
         {[["transfer","Transfer to Retailer"],["batches","My Batches"]].map(([key,label]) => (
           <button key={key} className={tab === key ? "btn" : "btn-outline"} onClick={() => handleTabChange(key)}>{label}</button>
@@ -85,7 +109,6 @@ export default function DistributorPage({ account }) {
             <button className="btn" onClick={transferToRetailer} disabled={loading}>
               {loading && <span className="spinner" />}{loading ? "Transferring..." : "Deliver to Retailer ⬡"}
             </button>
-            {result && <div className={result.type === "success" ? "tx-box" : "error-box"}>{result.msg}</div>}
           </div>
         </div>
       )}
@@ -98,7 +121,10 @@ export default function DistributorPage({ account }) {
           </div>
           <div className="card-body" style={{ padding: 0 }}>
             {loadingBatches ? (
-              <div style={{ padding: "32px", textAlign: "center", color: "#6b7280" }}>Loading from blockchain...</div>
+              <table>
+                <thead><tr><th>Batch ID</th><th>Produce</th><th>Qty (kg)</th><th>Origin</th><th>Farmer</th><th>Status</th></tr></thead>
+                <tbody>{[1,2,3].map(i => <SkeletonRow key={i} cols={6} />)}</tbody>
+              </table>
             ) : batches.length === 0 ? (
               <div style={{ padding: "32px", textAlign: "center", color: "#9ca3af" }}>No batches currently in your custody.</div>
             ) : (

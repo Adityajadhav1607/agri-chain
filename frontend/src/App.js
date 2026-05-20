@@ -7,7 +7,9 @@ import InspectorPage   from "./pages/InspectorPage";
 import LoginPage       from "./pages/LoginPage";
 import RegisterPage    from "./pages/RegisterPage";
 import AdminPage       from "./pages/AdminPage";
-import { loadSession, clearSession, getRoleFromChain } from "./utils/auth";
+import HomePage        from "./pages/HomePage";
+import { loadSession, clearSession, getRoleFromChain, switchNetwork } from "./utils/auth";
+import ToastProvider   from "./components/ToastProvider";
 import "./App.css";
 
 const ROLE_LABELS = {
@@ -20,9 +22,10 @@ const ROLE_LABELS = {
 };
 
 export default function App() {
-  const [session, setSession] = useState(null);
-  const [page,    setPage]    = useState("login");
-  const [loading, setLoading] = useState(true);
+  const [session, setSession]               = useState(null);
+  const [page,    setPage]                  = useState("home");
+  const [loading, setLoading]               = useState(true);
+  const [isWrongNetwork, setIsWrongNetwork] = useState(false);
 
   useEffect(() => {
     initApp();
@@ -33,9 +36,7 @@ export default function App() {
         setPage("login");
       });
       window.ethereum.on("chainChanged", () => {
-        clearSession();
-        setSession(null);
-        setPage("login");
+        initApp();
       });
     }
   }, []);
@@ -46,10 +47,23 @@ export default function App() {
       if (!existing) { setLoading(false); return; }
 
       if (window.ethereum) {
+        const chainId = await window.ethereum.request({ method: "eth_chainId" });
+        if (chainId !== "0xaa36a7" && chainId !== "0xAA36A7") {
+          setIsWrongNetwork(true);
+          setSession(existing);
+          setLoading(false);
+          return;
+        }
+        setIsWrongNetwork(false);
+
         const liveRole = await getRoleFromChain(existing.account);
-        const updated  = { ...existing, role: liveRole || existing.role };
-        localStorage.setItem("agrichain_session", JSON.stringify(updated));
-        setSession(updated);
+        if (liveRole && liveRole !== "unknown") {
+          const updated  = { ...existing, role: liveRole };
+          localStorage.setItem("agrichain_session", JSON.stringify(updated));
+          setSession(updated);
+        } else {
+          setSession(existing);
+        }
       } else {
         setSession(existing);
       }
@@ -61,12 +75,16 @@ export default function App() {
     }
   }
 
-  function handleLogin(newSession) { setSession(newSession); }
+  function handleLogin(newSession) { 
+    setIsWrongNetwork(false);
+    setSession(newSession); 
+  }
 
   function handleLogout() {
     clearSession();
     setSession(null);
-    setPage("login");
+    setIsWrongNetwork(false);
+    setPage("home");
   }
 
   function shortAddress(addr) {
@@ -82,14 +100,135 @@ export default function App() {
     </div>
   );
 
-  if (!session) {
-    if (page === "register") return <RegisterPage onBack={() => setPage("login")} />;
-    if (page === "admin")    return <AdminPage    onBack={() => setPage("login")} />;
+  if (isWrongNetwork) {
     return (
+      <div style={{
+        minHeight: "100vh",
+        background: "radial-gradient(circle at center, #1b3d22 0%, #0d1f11 100%)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "24px",
+        fontFamily: "'Segoe UI',sans-serif",
+        color: "white"
+      }}>
+        <div style={{
+          background: "rgba(255, 255, 255, 0.08)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderRadius: "24px",
+          padding: "40px 32px",
+          maxWidth: "460px",
+          width: "100%",
+          textAlign: "center",
+          border: "1px solid rgba(255, 255, 255, 0.15)",
+          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)"
+        }}>
+          <div style={{
+            fontSize: "64px",
+            marginBottom: "20px",
+            animation: "pulse 2s infinite",
+            display: "inline-block"
+          }}>⛓️</div>
+          <h2 style={{
+            fontSize: "26px",
+            fontWeight: "700",
+            marginBottom: "12px",
+            background: "linear-gradient(90deg, #ffc73c, #ff8c3b)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent"
+          }}>
+            Wrong Network Connected
+          </h2>
+          <p style={{
+            color: "rgba(255, 255, 255, 0.75)",
+            fontSize: "14px",
+            lineHeight: "1.6",
+            marginBottom: "28px"
+          }}>
+            AgriChain operates on the <strong>Sepolia Testnet</strong> network. Please switch your MetaMask network to continue using the application.
+          </p>
+          <button
+            onClick={async () => {
+              try {
+                await switchNetwork();
+                setIsWrongNetwork(false);
+                initApp();
+              } catch (e) {
+                console.error("Failed to switch network:", e);
+              }
+            }}
+            style={{
+              background: "linear-gradient(135deg, #1a6b3a 0%, #114a28 100%)",
+              color: "white",
+              border: "none",
+              borderRadius: "12px",
+              padding: "14px 36px",
+              fontSize: "15px",
+              fontWeight: "600",
+              cursor: "pointer",
+              boxShadow: "0 10px 20px rgba(26, 107, 58, 0.3)",
+              transition: "all 0.3s ease",
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px"
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.transform = "translateY(-2px)";
+              e.currentTarget.style.boxShadow = "0 15px 25px rgba(26, 107, 58, 0.5)";
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.transform = "none";
+              e.currentTarget.style.boxShadow = "0 10px 20px rgba(26, 107, 58, 0.3)";
+            }}
+          >
+            🦊 Switch to Sepolia Testnet
+          </button>
+          
+          <button 
+            onClick={handleLogout}
+            style={{
+              background: "transparent",
+              color: "rgba(255, 255, 255, 0.55)",
+              border: "none",
+              marginTop: "20px",
+              cursor: "pointer",
+              fontSize: "13px",
+              textDecoration: "underline",
+              fontFamily: "inherit"
+            }}
+          >
+            Or log out of session
+          </button>
+        </div>
+        <style>{`
+          @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.85; }
+            50% { transform: scale(1.08); opacity: 1; }
+            100% { transform: scale(1); opacity: 0.85; }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  if (!session) {
+    if (page === "register") return <RegisterPage onBack={() => setPage("home")} />;
+    if (page === "admin")    return <AdminPage    onBack={() => setPage("home")} />;
+    if (page === "login")    return (
       <LoginPage
         onLogin={handleLogin}
         onRegister={() => setPage("register")}
         onAdmin={()    => setPage("admin")}
+        onBack={()     => setPage("home")}
+      />
+    );
+    return (
+      <HomePage
+        onSignIn={()   => setPage("login")}
+        onRegister={() => setPage("register")}
       />
     );
   }
@@ -99,6 +238,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <ToastProvider />
       <header className="header">
         <h1>🌾 AgriChain</h1>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>

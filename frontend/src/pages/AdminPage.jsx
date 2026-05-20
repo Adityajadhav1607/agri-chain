@@ -2,37 +2,48 @@
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import ProduceRegistryABI from "../utils/ProduceRegistry.json";
-import { REGISTRY_ADDRESS } from "../utils/addresses";
+import TrackTransferABI   from "../utils/TrackTransfer.json";
+import QualityVerifierABI from "../utils/QualityVerifier.json";
+import { REGISTRY_ADDRESS, TRACKER_ADDRESS, VERIFIER_ADDRESS } from "../utils/addresses";
+import { toastSuccess, toastError, toastLoading, toastDismiss, toastInfo } from "../utils/toast";
 
 const ROLE_HASHES = {
   farmer:      ethers.keccak256(ethers.toUtf8Bytes("FARMER")),
   distributor: ethers.keccak256(ethers.toUtf8Bytes("DISTRIBUTOR")),
   retailer:    ethers.keccak256(ethers.toUtf8Bytes("RETAILER")),
+  inspector:   ethers.keccak256(ethers.toUtf8Bytes("INSPECTOR")),
 };
 
 export default function AdminPage({ onBack }) {
   const [requests,  setRequests]  = useState([]);
   const [loading,   setLoading]   = useState({});
-  const [results,   setResults]   = useState({});
   const [manualForm, setManual]   = useState({ address: "", role: "farmer" });
-  const [manualRes,  setManualRes] = useState(null);
 
   useEffect(() => {
     const raw = localStorage.getItem("agrichain_requests") || "[]";
     setRequests(JSON.parse(raw));
   }, []);
 
-  async function getContract() {
+  async function getContractForRole(role) {
     const provider = new ethers.BrowserProvider(window.ethereum);
     await provider.send("eth_requestAccounts", []);
     const signer = await provider.getSigner();
-    return new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, signer);
+    
+    if (role === "farmer" || role === "admin") {
+      return new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, signer);
+    } else if (role === "distributor" || role === "retailer") {
+      return new ethers.Contract(TRACKER_ADDRESS, TrackTransferABI.abi, signer);
+    } else if (role === "inspector") {
+      return new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, signer);
+    }
+    throw new Error("Invalid role");
   }
 
   async function approveRequest(req) {
+    const tid = toastLoading(`Approving ${req.name} as ${req.role}...`);
     try {
       setLoading(l => ({ ...l, [req.id]: true }));
-      const contract  = await getContract();
+      const contract  = await getContractForRole(req.role);
       const roleHash  = ROLE_HASHES[req.role];
       const alreadyHas = await contract.hasRole(roleHash, req.address);
       if (!alreadyHas) {
@@ -40,11 +51,11 @@ export default function AdminPage({ onBack }) {
         await tx.wait();
       }
       updateRequestStatus(req.id, "approved");
-      setResults(r => ({ ...r, [req.id]: { type:"success",
-        msg: `✅ ${req.name} approved as ${req.role}!` }}));
+      toastDismiss(tid);
+      toastSuccess(`✅ ${req.name} approved as ${req.role}!`);
     } catch (e) {
-      setResults(r => ({ ...r, [req.id]: { type:"error",
-        msg: e.reason || e.message }}));
+      toastDismiss(tid);
+      toastError(e.reason || e.message);
     } finally {
       setLoading(l => ({ ...l, [req.id]: false }));
     }
@@ -52,6 +63,7 @@ export default function AdminPage({ onBack }) {
 
   function rejectRequest(id) {
     updateRequestStatus(id, "rejected");
+    toastInfo("Request rejected.");
   }
 
   function updateRequestStatus(id, status) {
@@ -62,19 +74,20 @@ export default function AdminPage({ onBack }) {
 
   async function grantManual() {
     if (!ethers.isAddress(manualForm.address)) {
-      setManualRes({ type:"error", msg:"Invalid address" }); return;
+      toastError("Invalid address"); return;
     }
+    const tid = toastLoading("Processing role grant...");
     try {
-      setManualRes({ type:"loading", msg:"Processing..." });
-      const contract = await getContract();
+      const contract = await getContractForRole(manualForm.role);
       const roleHash = ROLE_HASHES[manualForm.role];
       const tx = await contract.grantRole(roleHash, manualForm.address);
       await tx.wait();
-      setManualRes({ type:"success",
-        msg:`✅ ${manualForm.role} role granted to ${manualForm.address.slice(0,10)}...` });
+      toastDismiss(tid);
+      toastSuccess(`✅ ${manualForm.role} role granted to ${manualForm.address.slice(0,10)}...`);
       setManual({ address:"", role:"farmer" });
     } catch (e) {
-      setManualRes({ type:"error", msg: e.reason || e.message });
+      toastDismiss(tid);
+      toastError(e.reason || e.message);
     }
   }
 
@@ -189,14 +202,6 @@ export default function AdminPage({ onBack }) {
                     fontSize:"12px", cursor:"pointer", fontFamily:"inherit"
                   }}>❌ Reject</button>
                 </div>
-                {results[req.id] && (
-                  <div style={{
-                    width:"100%", fontSize:"12px",
-                    color: results[req.id].type === "success" ? "#1a6b3a" : "#dc2626",
-                    background: results[req.id].type === "success" ? "#e8f5ee" : "#fee2e2",
-                    padding:"6px 10px", borderRadius:"5px"
-                  }}>{results[req.id].msg}</div>
-                )}
               </div>
             ))
           )}
@@ -249,6 +254,7 @@ export default function AdminPage({ onBack }) {
                   <option value="farmer">🌾 Farmer</option>
                   <option value="distributor">🚛 Distributor</option>
                   <option value="retailer">🏪 Retailer</option>
+                  <option value="inspector">🔬 Inspector</option>
                 </select>
               </div>
               <button onClick={grantManual} style={{
@@ -258,14 +264,6 @@ export default function AdminPage({ onBack }) {
                 whiteSpace:"nowrap"
               }}>Grant ⬡</button>
             </div>
-            {manualRes && (
-              <div style={{
-                marginTop:"10px", fontSize:"12px",
-                color: manualRes.type === "success" ? "#1a6b3a" : manualRes.type === "error" ? "#dc2626" : "#b45309",
-                background: manualRes.type === "success" ? "#e8f5ee" : manualRes.type === "error" ? "#fee2e2" : "#fef3c7",
-                padding:"8px 12px", borderRadius:"6px"
-              }}>{manualRes.msg}</div>
-            )}
           </div>
         </div>
 

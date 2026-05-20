@@ -3,8 +3,8 @@ const fs = require("fs");
 const path = require("path");
 
 async function main() {
-  const [deployer, farmer, distributor, retailer, inspector] =
-    await ethers.getSigners();
+  // On Sepolia there is only one signer — the deployer wallet from .env
+  const [deployer] = await ethers.getSigners();
 
   console.log("Deploying with account:", deployer.address);
   console.log("Balance:", ethers.formatEther(await deployer.provider.getBalance(deployer.address)), "ETH\n");
@@ -37,28 +37,19 @@ async function main() {
   console.log("QualityVerifier:    ", verifierAddr);
 
   // ── Role hashes ──────────────────────────────────────────────────
-  const OPERATOR_ROLE    = ethers.keccak256(ethers.toUtf8Bytes("OPERATOR"));
-  const FARMER_ROLE      = ethers.keccak256(ethers.toUtf8Bytes("FARMER"));
-  const DISTRIBUTOR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("DISTRIBUTOR"));
-  const RETAILER_ROLE    = ethers.keccak256(ethers.toUtf8Bytes("RETAILER"));
-  const INSPECTOR_ROLE   = ethers.keccak256(ethers.toUtf8Bytes("INSPECTOR"));
+  const OPERATOR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("OPERATOR"));
 
   // ── Grant OPERATOR to tracker & verifier on registry ─────────────
+  // (Required so TrackTransfer & QualityVerifier can update batch status)
   await (await registry.grantRole(OPERATOR_ROLE, trackerAddr)).wait();
   await (await registry.grantRole(OPERATOR_ROLE, verifierAddr)).wait();
   console.log("\nOperator roles granted to contracts");
 
-  // ── Grant test roles to Hardhat signers ──────────────────────────
-  await (await registry.grantRole(FARMER_ROLE,      farmer.address)).wait();
-  await (await tracker.grantRole(DISTRIBUTOR_ROLE,  distributor.address)).wait();
-  await (await tracker.grantRole(RETAILER_ROLE,     retailer.address)).wait();
-  await (await verifier.grantRole(INSPECTOR_ROLE,   inspector.address)).wait();
-
-  console.log("Test roles granted:");
-  console.log("  Farmer:      ", farmer.address);
-  console.log("  Distributor: ", distributor.address);
-  console.log("  Retailer:    ", retailer.address);
-  console.log("  Inspector:   ", inspector.address);
+  // ── NOTE: On Sepolia, user roles (FARMER, DISTRIBUTOR, RETAILER, INSPECTOR)
+  //   must be granted to real MetaMask wallet addresses via the Admin page or
+  //   a separate grantRoles.js script after deployment.
+  console.log("\n⚠️  Remember: grant FARMER/DISTRIBUTOR/RETAILER/INSPECTOR roles");
+  console.log("   to real MetaMask addresses via the Admin page after deployment.");
 
   // ── Write addresses to frontend ──────────────────────────────────
   const addressesFile = path.join(__dirname, "../../frontend/src/utils/addresses.js");

@@ -3,6 +3,8 @@ import { ethers } from "ethers";
 import QualityVerifierABI from "../utils/QualityVerifier.json";
 import ProduceRegistryABI from "../utils/ProduceRegistry.json";
 import { VERIFIER_ADDRESS, REGISTRY_ADDRESS } from "../utils/addresses";
+import { toastSuccess, toastError, toastLoading, toastDismiss } from "../utils/toast";
+import Confetti from "../components/Confetti";
 
 const GRADE_OPTIONS = [
   { value: 0, label: "Grade A — Excellent",  color: "#065f46", bg: "#d1fae5" },
@@ -18,7 +20,7 @@ export default function InspectorPage({ account }) {
   const [batchInfo, setBatchInfo] = useState(null);
   const [cert,  setCert]  = useState(null);
   const [loading, setLoading] = useState(false);
-  const [result,  setResult]  = useState(null);
+  const [confetti, setConfetti] = useState(false);
 
   const handle = e => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -50,37 +52,45 @@ export default function InspectorPage({ account }) {
         const c = await verifier.getBatchCertificate(BigInt(lookup.batchId));
         setCert({ grade: ["A","B","C","Rejected"][Number(c.grade)], passed: c.passed, remarks: c.remarks, ipfsHash: c.ipfsHash, issuedAt: new Date(Number(c.issuedAt)*1000).toLocaleDateString() });
       } catch { setCert(null); }
-      setResult(null);
     } catch {
       setBatchInfo(null);
-      setResult({ type: "error", msg: "Batch not found." });
+      toastError("Batch not found.");
     }
   }
 
   async function issueCertificate() {
-    if (!form.batchId) { setResult({ type: "error", msg: "Enter a Batch ID" }); return; }
+    if (!form.batchId) { toastError("Enter a Batch ID"); return; }
+    const tid = toastLoading("Waiting for MetaMask confirmation...");
     try {
-      setLoading(true); setResult(null);
+      setLoading(true);
       const signer   = await getSigner();
       const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, signer);
       const tx = await verifier.issueCertificate(BigInt(form.batchId), parseInt(form.grade), form.ipfsHash || "", form.remarks || "");
+      toastDismiss(tid);
+      toastLoading("Transaction submitted — waiting for block confirmation...");
       const receipt = await tx.wait();
       const event   = receipt.logs.find(l => { try { return verifier.interface.parseLog(l)?.name === "CertificateIssued"; } catch { return false; } });
       const certId  = event ? verifier.interface.parseLog(event).args[0].toString() : "?";
       const gradeLabel = GRADE_OPTIONS[parseInt(form.grade)].label;
-      setResult({ type: "success", msg: `✅ Certificate #${certId} issued! Grade: ${gradeLabel}. Tx: ${tx.hash.slice(0,22)}...` });
+      toastDismiss(tid);
+      toastSuccess(`✅ Certificate #${certId} issued! Grade: ${gradeLabel}`);
+      setConfetti(true);
+      setTimeout(() => setConfetti(false), 3600);
       setForm({ batchId: "", grade: "0", ipfsHash: "", remarks: "" });
       setBatchInfo(null); setCert(null);
     } catch (e) {
-      setResult({ type: "error", msg: e.reason || e.message });
+      toastDismiss(tid);
+      toastError(e.reason || e.message || "Transaction failed.");
     } finally { setLoading(false); }
   }
 
   return (
     <div>
+      <Confetti active={confetti} />
+
       <div style={{ marginBottom: "16px", display: "flex", gap: "8px" }}>
         {[["issue","Issue Certificate"],["verify","Verify Batch"]].map(([key,label]) => (
-          <button key={key} className={tab === key ? "btn" : "btn-outline"} onClick={() => { setTab(key); setResult(null); }}>{label}</button>
+          <button key={key} className={tab === key ? "btn" : "btn-outline"} onClick={() => { setTab(key); }}>{label}</button>
         ))}
       </div>
 
@@ -156,7 +166,6 @@ export default function InspectorPage({ account }) {
               <button className="btn" onClick={issueCertificate} disabled={loading || !!cert}>
                 {loading && <span className="spinner" />}{loading ? "Issuing..." : "Issue Certificate on Blockchain ⬡"}
               </button>
-              {result && <div className={result.type === "success" ? "tx-box" : "error-box"}>{result.msg}</div>}
             </div>
           </div>
         </>
@@ -176,7 +185,6 @@ export default function InspectorPage({ account }) {
                 <button className="btn-outline" onClick={lookupBatch}>Verify</button>
               </div>
             </div>
-            {result && <div className={result.type === "success" ? "tx-box" : "error-box"}>{result.msg}</div>}
             {cert ? (
               <div style={{ background: cert.passed ? "#e8f5ee" : "#fee2e2", border: `1px solid ${cert.passed ? "#4caf72" : "#f87171"}`, borderRadius: "10px", padding: "20px" }}>
                 <div style={{ fontSize: "32px", textAlign: "center", marginBottom: "12px" }}>{cert.passed ? "✅" : "❌"}</div>

@@ -3,19 +3,34 @@ import { ethers } from "ethers";
 import ProduceRegistryABI from "../utils/ProduceRegistry.json";
 import TrackTransferABI   from "../utils/TrackTransfer.json";
 import { REGISTRY_ADDRESS, TRACKER_ADDRESS } from "../utils/addresses";
+import { toastSuccess, toastError, toastLoading, toastDismiss } from "../utils/toast";
+import Confetti from "../components/Confetti";
 
 const STATUS_LABELS = ["Registered","In Transit","Quality Checked","Delivered","Rejected"];
 const STATUS_COLORS = ["#e8f5ee","#fef3c7","#eff6ff","#d1fae5","#fee2e2"];
 const STATUS_TEXT   = ["#1a6b3a","#92400e","#1e40af","#065f46","#991b1b"];
+
+// ── Skeleton row ─────────────────────────────────────────────────────────────
+function SkeletonRow({ cols = 7 }) {
+  return (
+    <tr>
+      {Array.from({ length: cols }).map((_, i) => (
+        <td key={i}>
+          <div style={{ height: "14px", borderRadius: "6px", background: "linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s ease infinite" }} />
+        </td>
+      ))}
+    </tr>
+  );
+}
 
 export default function FarmerPage({ account }) {
   const [tab, setTab]       = useState("register");
   const [form, setForm]     = useState({ produceType: "", quantity: "", farmLocation: "", certification: "None", notes: "" });
   const [transfer, setTransfer] = useState({ batchId: "", distributorAddr: "", location: "", temp: "25", transport: "0" });
   const [loading, setLoading]   = useState(false);
-  const [result, setResult]     = useState(null);
   const [batches, setBatches]   = useState([]);
   const [loadingBatches, setLoadingBatches] = useState(false);
+  const [confetti, setConfetti] = useState(false);
 
   const handle  = e => setForm({ ...form, [e.target.name]: e.target.value });
   const handleT = e => setTransfer({ ...transfer, [e.target.name]: e.target.value });
@@ -28,36 +43,48 @@ export default function FarmerPage({ account }) {
 
   async function registerBatch() {
     if (!form.produceType || !form.quantity || !form.farmLocation) {
-      setResult({ type: "error", msg: "Please fill all required fields." }); return;
+      toastError("Please fill all required fields."); return;
     }
+    const tid = toastLoading("Waiting for MetaMask confirmation...");
     try {
-      setLoading(true); setResult(null);
+      setLoading(true);
       const signer   = await getSigner();
       const contract = new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, signer);
       const tx       = await contract.registerBatch(form.produceType, BigInt(form.quantity), form.farmLocation, form.certification, form.notes);
+      toastDismiss(tid);
+      toastLoading("Transaction submitted — waiting for block confirmation...");
       const receipt  = await tx.wait();
       const event    = receipt.logs.find(l => { try { return contract.interface.parseLog(l)?.name === "BatchRegistered"; } catch { return false; } });
       const batchId  = event ? contract.interface.parseLog(event).args[0].toString() : "?";
-      setResult({ type: "success", msg: `✅ Batch #${batchId} registered on blockchain! Tx: ${tx.hash.slice(0,22)}...` });
+      toastDismiss(tid);
+      toastSuccess(`✅ Batch #${batchId} registered on blockchain!`);
+      setConfetti(true);
+      setTimeout(() => setConfetti(false), 3600);
       setForm({ produceType: "", quantity: "", farmLocation: "", certification: "None", notes: "" });
     } catch (e) {
-      setResult({ type: "error", msg: e.reason || e.message });
+      toastDismiss(tid);
+      toastError(e.reason || e.message || "Transaction failed.");
     } finally { setLoading(false); }
   }
 
   async function transferToDistributor() {
-    if (!transfer.batchId) { setResult({ type: "error", msg: "Enter Batch ID" }); return; }
-    if (!ethers.isAddress(transfer.distributorAddr)) { setResult({ type: "error", msg: "Enter a valid distributor wallet address" }); return; }
+    if (!transfer.batchId) { toastError("Enter Batch ID"); return; }
+    if (!ethers.isAddress(transfer.distributorAddr)) { toastError("Enter a valid distributor wallet address"); return; }
+    const tid = toastLoading("Waiting for MetaMask confirmation...");
     try {
-      setLoading(true); setResult(null);
+      setLoading(true);
       const signer   = await getSigner();
       const contract = new ethers.Contract(TRACKER_ADDRESS, TrackTransferABI.abi, signer);
       const tx = await contract.logTransfer(BigInt(transfer.batchId), transfer.distributorAddr, parseInt(transfer.transport), parseInt(transfer.temp), transfer.location || "Farm Gate", "Transferred to distributor");
+      toastDismiss(tid);
+      toastLoading("Transaction submitted — waiting for block confirmation...");
       await tx.wait();
-      setResult({ type: "success", msg: `✅ Batch #${transfer.batchId} transferred to distributor! Tx: ${tx.hash.slice(0,22)}...` });
+      toastDismiss(tid);
+      toastSuccess(`✅ Batch #${transfer.batchId} transferred to distributor!`);
       setTransfer({ batchId: "", distributorAddr: "", location: "", temp: "25", transport: "0" });
     } catch (e) {
-      setResult({ type: "error", msg: e.reason || e.message });
+      toastDismiss(tid);
+      toastError(e.reason || e.message || "Transaction failed.");
     } finally { setLoading(false); }
   }
 
@@ -78,14 +105,17 @@ export default function FarmerPage({ account }) {
         harvestDate:  new Date(Number(b.harvestTimestamp) * 1000).toLocaleDateString(),
         currentHolder:b.currentHolder,
       })));
-    } catch (e) { console.error(e); }
+    } catch (e) { toastError("Failed to load batches."); console.error(e); }
     finally { setLoadingBatches(false); }
   }, [account]);
 
-  function handleTabChange(t) { setTab(t); setResult(null); if (t === "batches") loadMyBatches(); }
+  function handleTabChange(t) { setTab(t); if (t === "batches") loadMyBatches(); }
 
   return (
     <div>
+      <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
+      <Confetti active={confetti} />
+
       {/* Tabs */}
       <div style={{ marginBottom: "16px", display: "flex", gap: "8px" }}>
         {[["register","Register Batch"],["transfer","Transfer to Distributor"],["batches","My Batches"]].map(([key,label]) => (
@@ -113,7 +143,6 @@ export default function FarmerPage({ account }) {
             <button className="btn" onClick={registerBatch} disabled={loading}>
               {loading && <span className="spinner" />}{loading ? "Registering..." : "Register Batch ⬡"}
             </button>
-            {result && <div className={result.type === "success" ? "tx-box" : "error-box"}>{result.msg}</div>}
           </div>
         </div>
       )}
@@ -138,7 +167,6 @@ export default function FarmerPage({ account }) {
             <button className="btn" onClick={transferToDistributor} disabled={loading}>
               {loading && <span className="spinner" />}{loading ? "Transferring..." : "Transfer to Distributor ⬡"}
             </button>
-            {result && <div className={result.type === "success" ? "tx-box" : "error-box"}>{result.msg}</div>}
           </div>
         </div>
       )}
@@ -152,7 +180,10 @@ export default function FarmerPage({ account }) {
           </div>
           <div className="card-body" style={{ padding: 0 }}>
             {loadingBatches ? (
-              <div style={{ padding: "32px", textAlign: "center", color: "#6b7280" }}>Loading batches from blockchain...</div>
+              <table>
+                <thead><tr><th>Batch ID</th><th>Produce</th><th>Qty (kg)</th><th>Location</th><th>Cert</th><th>Harvest</th><th>Status</th></tr></thead>
+                <tbody>{[1,2,3].map(i => <SkeletonRow key={i} cols={7} />)}</tbody>
+              </table>
             ) : batches.length === 0 ? (
               <div style={{ padding: "32px", textAlign: "center", color: "#9ca3af" }}>No batches registered yet. Use the Register tab to add your first batch.</div>
             ) : (

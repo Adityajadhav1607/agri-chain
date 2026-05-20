@@ -3,20 +3,34 @@ import { ethers } from "ethers";
 import { QRCodeSVG } from "qrcode.react";
 import ProduceRegistryABI from "../utils/ProduceRegistry.json";
 import { REGISTRY_ADDRESS } from "../utils/addresses";
+import { toastSuccess, toastError, toastLoading, toastDismiss } from "../utils/toast";
+import Confetti from "../components/Confetti";
 
 const STATUS_LABELS = ["Registered","In Transit","Quality Checked","Delivered","Rejected"];
 const STATUS_COLORS = ["#e8f5ee","#fef3c7","#eff6ff","#d1fae5","#fee2e2"];
 const STATUS_TEXT   = ["#1a6b3a","#92400e","#1e40af","#065f46","#991b1b"];
 
+function SkeletonRow({ cols = 7 }) {
+  return (
+    <tr>
+      {Array.from({ length: cols }).map((_, i) => (
+        <td key={i}>
+          <div style={{ height: "14px", borderRadius: "6px", background: "linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s ease infinite" }} />
+        </td>
+      ))}
+    </tr>
+  );
+}
+
 export default function RetailerPage({ account }) {
   const [tab, setTab]       = useState("confirm");
   const [batchId, setBatchId] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result,  setResult]  = useState(null);
   const [batchInfo, setBatchInfo] = useState(null);
   const [batches, setBatches]     = useState([]);
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [activeQrBatch, setActiveQrBatch]   = useState(null);
+  const [confetti, setConfetti] = useState(false);
 
   async function getSigner() {
     const provider = new ethers.BrowserProvider(window.ethereum);
@@ -38,26 +52,31 @@ export default function RetailerPage({ account }) {
         status:        Number(batch.status),
         currentHolder: batch.currentHolder,
       });
-      setResult(null);
     } catch (e) {
       setBatchInfo(null);
-      setResult({ type: "error", msg: "Batch not found. Check the ID." });
+      toastError("Batch not found. Check the ID.");
     }
   }
 
   async function confirmDelivery() {
-    if (!batchId) { setResult({ type: "error", msg: "Enter Batch ID" }); return; }
+    if (!batchId) { toastError("Enter Batch ID"); return; }
+    const tid = toastLoading("Waiting for MetaMask confirmation...");
     try {
-      setLoading(true); setResult(null);
+      setLoading(true);
       const signer   = await getSigner();
       const contract = new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, signer);
-      // confirmDelivery() requires msg.sender == currentHolder — no OPERATOR_ROLE needed
       const tx = await contract.confirmDelivery(BigInt(batchId));
+      toastDismiss(tid);
+      toastLoading("Transaction submitted — waiting for block confirmation...");
       await tx.wait();
-      setResult({ type: "success", msg: `✅ Batch #${batchId} marked as Delivered! Tx: ${tx.hash.slice(0,22)}...` });
+      toastDismiss(tid);
+      toastSuccess(`✅ Batch #${batchId} marked as Delivered! QR code is ready.`);
       setBatchInfo(b => b ? { ...b, status: 3 } : b);
+      setConfetti(true);
+      setTimeout(() => setConfetti(false), 3600);
     } catch (e) {
-      setResult({ type: "error", msg: e.reason || e.message });
+      toastDismiss(tid);
+      toastError(e.reason || e.message || "Transaction failed.");
     } finally { setLoading(false); }
   }
 
@@ -77,16 +96,19 @@ export default function RetailerPage({ account }) {
         certification:b.certification,
         status:       Number(b.status),
       })));
-    } catch (e) { console.error(e); }
+    } catch (e) { toastError("Failed to load batches."); console.error(e); }
     finally { setLoadingBatches(false); }
   }, [account]);
 
-  function handleTabChange(t) { setTab(t); setResult(null); if (t === "batches") loadMyBatches(); }
+  function handleTabChange(t) { setTab(t); if (t === "batches") loadMyBatches(); }
 
   const qrUrlForId = (id) => `${window.location.origin}?batch=${id}`;
 
   return (
     <div>
+      <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
+      <Confetti active={confetti} />
+
       <div style={{ marginBottom: "16px", display: "flex", gap: "8px" }}>
         {[["confirm","Confirm Delivery"],["batches","My Batches"]].map(([key,label]) => (
           <button key={key} className={tab === key ? "btn" : "btn-outline"} onClick={() => handleTabChange(key)}>{label}</button>
@@ -139,7 +161,6 @@ export default function RetailerPage({ account }) {
             <button className="btn" onClick={confirmDelivery} disabled={loading}>
               {loading && <span className="spinner" />}{loading ? "Confirming..." : "Confirm Delivery ⬡"}
             </button>
-            {result && <div className={result.type === "success" ? "tx-box" : "error-box"}>{result.msg}</div>}
           </div>
         </div>
       )}
@@ -152,7 +173,10 @@ export default function RetailerPage({ account }) {
           </div>
           <div className="card-body" style={{ padding: 0 }}>
             {loadingBatches ? (
-              <div style={{ padding: "32px", textAlign: "center", color: "#6b7280" }}>Loading from blockchain...</div>
+              <table>
+                <thead><tr><th>Batch ID</th><th>Produce</th><th>Qty (kg)</th><th>Origin</th><th>Cert</th><th>Status</th><th style={{ textAlign: "center" }}>Customer QR</th></tr></thead>
+                <tbody>{[1,2,3].map(i => <SkeletonRow key={i} cols={7} />)}</tbody>
+              </table>
             ) : batches.length === 0 ? (
               <div style={{ padding: "32px", textAlign: "center", color: "#9ca3af" }}>No batches currently in your custody.</div>
             ) : (

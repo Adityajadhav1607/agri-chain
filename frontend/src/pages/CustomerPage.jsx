@@ -5,6 +5,7 @@ import TrackTransferABI   from "../utils/TrackTransfer.json";
 import ProduceRegistryABI from "../utils/ProduceRegistry.json";
 import QualityVerifierABI from "../utils/QualityVerifier.json";
 import { TRACKER_ADDRESS, REGISTRY_ADDRESS, VERIFIER_ADDRESS } from "../utils/addresses";
+import { toastError } from "../utils/toast";
 
 const STATUS_LABELS = ["Registered","In Transit","Quality Checked","Delivered","Rejected"];
 const STATUS_COLORS = ["#e8f5ee","#fef3c7","#eff6ff","#d1fae5","#fee2e2"];
@@ -18,7 +19,6 @@ export default function CustomerPage() {
   const [batchInfo, setBatchInfo] = useState(null);
   const [history,   setHistory]   = useState([]);
   const [cert,      setCert]      = useState(null);
-  const [error,     setError]     = useState(null);
 
   // Auto-trace if URL has ?batch= param
   useEffect(() => {
@@ -28,7 +28,8 @@ export default function CustomerPage() {
   }, []); // eslint-disable-line
 
   async function getContracts() {
-    const provider = new ethers.BrowserProvider(window.ethereum);
+    // Use a public Sepolia RPC — no MetaMask required for read-only tracing
+    const provider = new ethers.JsonRpcProvider("https://ethereum-sepolia-rpc.publicnode.com");
     return {
       registry: new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, provider),
       tracker:  new ethers.Contract(TRACKER_ADDRESS,  TrackTransferABI.abi,   provider),
@@ -79,7 +80,7 @@ export default function CustomerPage() {
       } catch { /* no cert yet */ }
 
     } catch (e) {
-      setError("Batch not found. Please check the ID and make sure the Hardhat node is running.");
+      toastError("Batch not found. Please check the ID — it must exist on the Sepolia testnet.");
     } finally { setLoading(false); }
   }
 
@@ -103,7 +104,6 @@ export default function CustomerPage() {
             </button>
           </div>
           <div style={{ fontSize: "11px", color: "#9ca3af" }}>You can also scan a QR code to auto-load a batch.</div>
-          {error && <div className="error-box">{error}</div>}
         </div>
       </div>
 
