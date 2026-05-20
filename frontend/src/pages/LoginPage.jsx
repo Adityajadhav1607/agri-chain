@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { signInWithEthereum } from "../utils/auth";
+import { signInWithEthereum, MetaMaskNotFoundError } from "../utils/auth";
 
 export default function LoginPage({ onLogin, onRegister, onAdmin }) {
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(null);
-  const [step,    setStep]    = useState("idle");
+  const [loading,    setLoading]    = useState(false);
+  const [error,      setError]      = useState(null);
+  const [step,       setStep]       = useState("idle");
+  const [noMetaMask, setNoMetaMask] = useState(!window.ethereum);
 
   const roles = [
     { emoji:"🌾", title:"Farmer",      desc:"Register batches & transfer to distributor", color:"#1a6b3a", bg:"#e8f5ee" },
@@ -14,6 +15,10 @@ export default function LoginPage({ onLogin, onRegister, onAdmin }) {
   ];
 
   async function handleLogin() {
+    if (!window.ethereum) {
+      setNoMetaMask(true);
+      return;
+    }
     try {
       setLoading(true); setError(null);
       setStep("connecting");
@@ -24,7 +29,11 @@ export default function LoginPage({ onLogin, onRegister, onAdmin }) {
       await new Promise(r => setTimeout(r, 500));
       onLogin(session);
     } catch (e) {
-      setError(e.message || "Login failed.");
+      if (e instanceof MetaMaskNotFoundError) {
+        setNoMetaMask(true);
+      } else {
+        setError(e.message || "Login failed.");
+      }
       setStep("idle");
     } finally { setLoading(false); }
   }
@@ -130,6 +139,83 @@ export default function LoginPage({ onLogin, onRegister, onAdmin }) {
           cursor:"pointer", fontFamily:"inherit"
         }}>🔧 Admin Panel</button>
       </div>
+
+      {/* MetaMask Not Installed Banner */}
+      {noMetaMask && (
+        <div style={{
+          background:"linear-gradient(135deg,#fff8f0,#fff3e0)",
+          border:"2px solid #f97316",
+          borderRadius:"14px", padding:"20px 22px",
+          maxWidth:"460px", width:"100%", marginBottom:"16px"
+        }}>
+          <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"12px" }}>
+            <span style={{ fontSize:"28px" }}>🦊</span>
+            <div>
+              <div style={{ fontWeight:"700", fontSize:"15px", color:"#c2410c" }}>
+                MetaMask Not Detected
+              </div>
+              <div style={{ fontSize:"12px", color:"#78350f", marginTop:"2px" }}>
+                A MetaMask wallet is required to sign in to AgriChain.
+              </div>
+            </div>
+          </div>
+
+          {/* Download button */}
+          <a
+            href="https://metamask.io/download/"
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              display:"block", textAlign:"center",
+              background:"#f97316", color:"white",
+              borderRadius:"8px", padding:"10px",
+              fontWeight:"600", fontSize:"14px",
+              textDecoration:"none", marginBottom:"16px"
+            }}
+          >
+            📥 Download MetaMask — metamask.io
+          </a>
+
+          {/* Setup steps */}
+          <div style={{ fontSize:"12px", color:"#78350f" }}>
+            <div style={{ fontWeight:"700", marginBottom:"8px", fontSize:"13px", color:"#c2410c" }}>
+              📱 How to set up MetaMask on a new device:
+            </div>
+            {[
+              { n:"1", t:"Install MetaMask",    d:"Click the button above → install the browser extension (Chrome / Firefox / Brave) or the mobile app from metamask.io." },
+              { n:"2", t:"Import your wallet",  d:"Choose \"Import wallet\" and enter your 12-word Secret Recovery Phrase from your existing MetaMask to restore the same account." },
+              { n:"3", t:"Switch to Sepolia",   d:"Open MetaMask → click the network dropdown → select \"Sepolia Testnet\". (Enable test networks in Settings → Advanced if you don't see it.)" },
+              { n:"4", t:"Come back & Sign In", d:"Return to this page and click \"Sign In With Ethereum\". MetaMask will ask you to sign a message — approve it and you're in!" },
+            ].map(s => (
+              <div key={s.n} style={{
+                display:"flex", gap:"10px", marginBottom:"10px",
+                padding:"10px", background:"white",
+                borderRadius:"8px", border:"1px solid #fed7aa"
+              }}>
+                <div style={{
+                  minWidth:"22px", height:"22px", borderRadius:"50%",
+                  background:"#f97316", color:"white",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  fontWeight:"700", fontSize:"11px", flexShrink:0
+                }}>{s.n}</div>
+                <div>
+                  <div style={{ fontWeight:"600", fontSize:"12px", color:"#c2410c", marginBottom:"2px" }}>{s.t}</div>
+                  <div style={{ fontSize:"11px", color:"#92400e", lineHeight:"1.5" }}>{s.d}</div>
+                </div>
+              </div>
+            ))}
+            <div style={{
+              marginTop:"4px", padding:"8px 12px",
+              background:"#fff7ed", borderRadius:"6px",
+              border:"1px dashed #fdba74",
+              fontSize:"11px", color:"#92400e"
+            }}>
+              ⚠️ <strong>Never share</strong> your Secret Recovery Phrase with anyone.
+              AgriChain will <strong>never</strong> ask for it.
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div style={{

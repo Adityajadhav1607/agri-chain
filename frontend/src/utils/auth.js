@@ -4,6 +4,14 @@ import TrackTransferABI   from "./TrackTransfer.json";
 import QualityVerifierABI from "./QualityVerifier.json";
 import { REGISTRY_ADDRESS, TRACKER_ADDRESS, VERIFIER_ADDRESS } from "./addresses";
 
+/** Thrown when window.ethereum is not available (MetaMask not installed). */
+export class MetaMaskNotFoundError extends Error {
+  constructor() {
+    super("MetaMask not found. Please install MetaMask to continue.");
+    this.name = "MetaMaskNotFoundError";
+  }
+}
+
 const SESSION_KEY = "agrichain_session";
 
 const ROLE_HASHES = {
@@ -71,17 +79,17 @@ export async function switchNetwork() {
   try {
     await window.ethereum.request({
       method: "wallet_switchEthereumChain",
-      params: [{ chainId: "0x7A69" }],
+      params: [{ chainId: "0xAA36A7" }],
     });
   } catch (e) {
     if (e.code === 4902) {
       await window.ethereum.request({
         method: "wallet_addEthereumChain",
         params: [{
-          chainId:        "0x7A69",
-          chainName:      "Hardhat Local",
+          chainId:        "0xAA36A7",
+          chainName:      "Sepolia Testnet",
           nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
-          rpcUrls:        ["http://127.0.0.1:8545"],
+          rpcUrls:        ["https://rpc.sepolia.org"],
         }],
       });
     }
@@ -89,7 +97,7 @@ export async function switchNetwork() {
 }
 
 export async function signInWithEthereum() {
-  if (!window.ethereum) throw new Error("MetaMask not found. Please install MetaMask.");
+  if (!window.ethereum) throw new MetaMaskNotFoundError();
 
   await switchNetwork();
 
@@ -106,7 +114,7 @@ export async function signInWithEthereum() {
     "",
     `URI: ${window.location.origin}`,
     "Version: 1",
-    "Chain ID: 31337",
+    "Chain ID: 11155111",
     `Nonce: ${nonce}`,
     `Issued At: ${issuedAt}`,
   ].join("\n");
