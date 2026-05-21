@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import FloatingAIBot from "../components/FloatingAIBot";
 
 /* ─────────────────────────────────────────────────────────────
    STATIC DATA
@@ -776,6 +777,7 @@ export default function HomePage({ onSignIn, onRegister }) {
           </div>
         </div>
       </footer>
+      <FloatingAIBot dark={dark} />
     </div>
   );
 }
