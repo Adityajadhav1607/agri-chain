@@ -27,7 +27,8 @@ const { ethers } = require("hardhat");
 // ══════════════════════════════════════════════════════════════════════════════
 
 const VERIFIER_ADDRESS      = "0xC9D48a0f03942B8cae52ab58e6c3343535D8CC18"; // Already deployed
-const CARBON_CREDIT_ADDRESS = "FILL_ME_IN"; // <── paste address from deployCarbonCredit.js output
+const CARBON_CREDIT_ADDRESS = "0xd9e911CC058b99C1a15eEC5C6A2E5b884A3111b0"; // Deployed 2026-05-21
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 
