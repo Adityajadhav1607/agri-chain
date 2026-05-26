@@ -8,6 +8,7 @@ import LoginPage       from "./pages/LoginPage";
 import RegisterPage    from "./pages/RegisterPage";
 import AdminPage       from "./pages/AdminPage";
 import HomePage        from "./pages/HomePage";
+import PublicTracePage from "./pages/PublicTracePage";
 import { loadSession, clearSession, getRoleFromChain, switchNetwork } from "./utils/auth";
 import ToastProvider   from "./components/ToastProvider";
 import DarkModeToggle  from "./components/DarkModeToggle";
@@ -27,12 +28,21 @@ export default function App() {
   const [page,    setPage]                  = useState("home");
   const [loading, setLoading]               = useState(true);
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
+  const [publicBatchId, setPublicBatchId]   = useState("");
 
   useEffect(() => {
+    // ── Detect ?batch= QR scan param ──────────────────────────────────
+    const params = new URLSearchParams(window.location.search);
+    const qrBatch = params.get("batch");
+    if (qrBatch) {
+      setPublicBatchId(qrBatch);
+      setPage("public-trace");
+    }
+    // ────────────────────────────────────────────────────────────────
     initApp();
     if (window.ethereum) {
       window.ethereum.on("accountsChanged", () => {
-        clearSession(); setSession(null); setPage("login");
+        clearSession(); setSession(null); setPage("home");
       });
       window.ethereum.on("chainChanged", () => initApp());
     }
@@ -116,12 +126,19 @@ export default function App() {
   );
 
   if (!session) {
-    if (page === "register") return <RegisterPage onBack={() => setPage("home")} />;
-    if (page === "admin")    return <AdminPage    onBack={() => setPage("home")} />;
-    if (page === "login")    return (
+    if (page === "register")     return <RegisterPage onBack={() => setPage("home")} />;
+    if (page === "admin")        return <AdminPage    onBack={() => setPage("home")} />;
+    if (page === "public-trace") return (
+      <PublicTracePage
+        initialBatchId={publicBatchId}
+        onSignIn={() => setPage("login")}
+        onBack={() => { setPage("home"); window.history.replaceState({}, "", window.location.pathname); }}
+      />
+    );
+    if (page === "login")        return (
       <LoginPage onLogin={handleLogin} onRegister={() => setPage("register")} onAdmin={() => setPage("admin")} onBack={() => setPage("home")} />
     );
-    return <HomePage onSignIn={() => setPage("login")} onRegister={() => setPage("register")} />;
+    return <HomePage onSignIn={() => setPage("login")} onRegister={() => setPage("register")} onTrace={(id) => { setPublicBatchId(id); setPage("public-trace"); }} />;
   }
 
   const roleInfo  = ROLE_LABELS[session.role];
@@ -151,15 +168,30 @@ export default function App() {
         {session.role === "farmer"      && <FarmerPage      account={session.account} />}
         {session.role === "distributor" && <DistributorPage account={session.account} />}
         {session.role === "retailer"    && <RetailerPage    account={session.account} />}
-        {session.role === "customer"    && <CustomerPage    account={session.account} />}
+        {session.role === "customer"    && <CustomerPage    account={session.account} initialBatchId={publicBatchId} />}
         {session.role === "inspector"   && <InspectorPage   account={session.account} />}
         {session.role === "admin"       && <AdminPage       onBack={handleLogout} />}
         {session.role === "unknown"     && (
           <div className="connect-prompt">
             <div style={{ fontSize:48 }}>❓</div>
             <h2>Unregistered Wallet</h2>
-            <p>This wallet has no role assigned yet. Contact the AgriChain admin to get a role.</p>
-            <button className="btn" onClick={handleLogout} style={{ marginTop:20 }}>← Back to Login</button>
+            <p>This wallet has no role assigned yet. Contact the AgriChain admin to get a role assigned on-chain.</p>
+            <p style={{ fontSize:12, color:"#6b7280", marginTop:8, fontFamily:"monospace" }}>Wallet: {session.account}</p>
+            <div style={{ display:"flex", gap:10, marginTop:20, flexWrap:"wrap", justifyContent:"center" }}>
+              <button className="btn" onClick={async () => {
+                try {
+                  const liveRole = await getRoleFromChain(session.account);
+                  if (liveRole && liveRole !== "unknown") {
+                    const updated = { ...session, role: liveRole };
+                    localStorage.setItem("agrichain_session", JSON.stringify(updated));
+                    setSession(updated);
+                  } else {
+                    alert("Role still not found on-chain. Ask admin to run grantRole() for your wallet address.");
+                  }
+                } catch(e) { alert("Error checking role: " + e.message); }
+              }}>🔄 Re-check Role</button>
+              <button className="btn" onClick={handleLogout} style={{ background:"#6b7280" }}>← Logout</button>
+            </div>
           </div>
         )}
       </main>

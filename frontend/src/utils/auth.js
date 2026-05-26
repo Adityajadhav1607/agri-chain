@@ -54,19 +54,38 @@ export function clearSession() {
 /** Reads the actual role from the blockchain for a given address. */
 export async function getRoleFromChain(address) {
   try {
-    const provider = new ethers.BrowserProvider(window.ethereum);
+    // Prefer BrowserProvider if MetaMask is available, else fall back to public RPC
+    const provider = window.ethereum
+      ? new ethers.BrowserProvider(window.ethereum)
+      : new ethers.JsonRpcProvider("https://ethereum-sepolia-rpc.publicnode.com");
 
     const registry = new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, provider);
     const tracker  = new ethers.Contract(TRACKER_ADDRESS,  TrackTransferABI.abi,   provider);
     const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, provider);
 
-    // Admin check first (admin of registry = deployer)
-    if (await registry.hasRole(ROLE_HASHES.admin, address))       return "admin";
-    // Role checks across contracts
-    if (await registry.hasRole(ROLE_HASHES.farmer, address))      return "farmer";
-    if (await tracker.hasRole(ROLE_HASHES.distributor, address))  return "distributor";
-    if (await tracker.hasRole(ROLE_HASHES.retailer, address))     return "retailer";
-    if (await verifier.hasRole(ROLE_HASHES.inspector, address))   return "inspector";
+    // Admin: the deployer gets ADMIN_ROLE in constructor — check across all 3 contracts
+    const [isAdminReg, isAdminTrk, isAdminVer] = await Promise.all([
+      registry.hasRole(ROLE_HASHES.admin, address).catch(() => false),
+      tracker.hasRole(ROLE_HASHES.admin,  address).catch(() => false),
+      verifier.hasRole(ROLE_HASHES.admin, address).catch(() => false),
+    ]);
+    if (isAdminReg || isAdminTrk || isAdminVer) return "admin";
+
+    // Farmer — ProduceRegistry
+    if (await registry.hasRole(ROLE_HASHES.farmer, address).catch(() => false))      return "farmer";
+
+    // Distributor & Retailer — TrackTransfer
+    if (await tracker.hasRole(ROLE_HASHES.distributor, address).catch(() => false))  return "distributor";
+    if (await tracker.hasRole(ROLE_HASHES.retailer,    address).catch(() => false))  return "retailer";
+
+    // Inspector — check ALL three contracts (role may have been granted on any of them)
+    const [isInspReg, isInspTrk, isInspVer] = await Promise.all([
+      registry.hasRole(ROLE_HASHES.inspector, address).catch(() => false),
+      tracker.hasRole(ROLE_HASHES.inspector,  address).catch(() => false),
+      verifier.hasRole(ROLE_HASHES.inspector, address).catch(() => false),
+    ]);
+    console.log(`Inspector check for ${address}: registry=${isInspReg}, tracker=${isInspTrk}, verifier=${isInspVer}`);
+    if (isInspReg || isInspTrk || isInspVer) return "inspector";
 
     return "customer";
   } catch (e) {

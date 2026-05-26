@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import { ethers } from "ethers";
 import { QRCodeSVG } from "qrcode.react";
 import FloatingAIBot from "../components/FloatingAIBot";
+import ProduceRegistryABI from "../utils/ProduceRegistry.json";
+import TrackTransferABI   from "../utils/TrackTransfer.json";
+import QualityVerifierABI from "../utils/QualityVerifier.json";
+import { REGISTRY_ADDRESS, TRACKER_ADDRESS, VERIFIER_ADDRESS } from "../utils/addresses";
 
 /* ─────────────────────────────────────────────────────────────
    STATIC DATA
@@ -171,27 +176,70 @@ function SH({ label, title, sub, dark, center = true }) {
 /* ─────────────────────────────────────────────────────────────
    MAIN COMPONENT
 ───────────────────────────────────────────────────────────── */
-export default function HomePage({ onSignIn, onRegister }) {
+export default function HomePage({ onSignIn, onRegister, onTrace }) {
   const [dark, setDark]       = useState(false);
   const [wallet, setWallet]   = useState(null);
   const [feed, setFeed]       = useState(INIT_FEED);
-  const [batchId, setBatchId] = useState("AC-2041");
-  const [steps, setSteps]     = useState([]);
-  const [tracing, setTracing] = useState(false);
+  const [batchId, setBatchId] = useState("");
   const [openFaq, setOpenFaq] = useState(null);
   const [statsOn, setStatsOn] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [realStats, setRealStats] = useState({ batches: null, transfers: null, certs: null, totalKg: null });
   const statsRef = useRef(null);
 
-  const cBatches = useCounter(1247,  statsOn);
-  const cKg      = useCounter(48300, statsOn);
-  const cTx      = useCounter(3891,  statsOn);
+  // Real on-chain stats counters — animate from realStats once loaded
+  const cBatches = useCounter(realStats.batches   ?? 0, statsOn && realStats.batches   !== null);
+  const cKg      = useCounter(realStats.totalKg   ?? 0, statsOn && realStats.totalKg   !== null);
+  const cTx      = useCounter(realStats.transfers ?? 0, statsOn && realStats.transfers !== null);
 
   /* wallet */
   useEffect(() => {
     if (!window.ethereum) return;
     window.ethereum.request({ method:"eth_accounts" }).then(a => { if (a[0]) setWallet(a[0]); });
     window.ethereum.on("accountsChanged", a => setWallet(a[0] || null));
+  }, []);
+
+  /* ── Fetch REAL on-chain stats ────────────────────────────── */
+  useEffect(() => {
+    async function loadStats() {
+      try {
+        const provider = new ethers.JsonRpcProvider("https://ethereum-sepolia-rpc.publicnode.com");
+        const registry = new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, provider);
+        const tracker  = new ethers.Contract(TRACKER_ADDRESS,  TrackTransferABI.abi,   provider);
+        const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, provider);
+
+        // Total batches registered on-chain
+        const totalBatches = await registry.totalBatches().catch(() => null);
+        // Total quality certificates issued
+        const totalCerts   = await verifier.totalCertificates().catch(() => null);
+        // Total transfers: sum up transfer count for each batch
+        let totalTransfers = 0;
+        let totalKg = 0;
+        if (totalBatches !== null) {
+          const count = Number(totalBatches);
+          const ids = Array.from({ length: count }, (_, i) => BigInt(1000 + i));
+          await Promise.all(ids.map(async id => {
+            try {
+              const [tc, batch] = await Promise.all([
+                tracker.getTransferCount(id).catch(() => 0n),
+                registry.getBatch(id).catch(() => null),
+              ]);
+              totalTransfers += Number(tc);
+              if (batch) totalKg += Number(batch.quantity);
+            } catch { /* skip */ }
+          }));
+        }
+        setRealStats({
+          batches:   totalBatches !== null ? Number(totalBatches) : null,
+          transfers: totalTransfers || null,
+          certs:     totalCerts    !== null ? Number(totalCerts) : null,
+          totalKg:   totalKg || null,
+        });
+      } catch (e) {
+        console.warn("Stats load error:", e);
+      }
+    }
+    loadStats();
   }, []);
 
   /* live feed ticker */
@@ -215,13 +263,10 @@ export default function HomePage({ onSignIn, onRegister }) {
     return () => obs.disconnect();
   }, []);
 
-  async function handleTrace() {
-    setTracing(true); setSteps([]);
-    for (let i = 0; i < TRACE_STEPS.length; i++) {
-      await new Promise(r => setTimeout(r, 580));
-      setSteps(p => [...p, TRACE_STEPS[i]]);
-    }
-    setTracing(false);
+  function handleTrace() {
+    const rawId = batchId.toString().trim().replace(/^AC-?/i, "");
+    if (!rawId) return;
+    if (onTrace) onTrace(rawId);
   }
 
   const short = a => a ? a.slice(0,6) + "..." + a.slice(-4) : "";
@@ -479,89 +524,45 @@ export default function HomePage({ onSignIn, onRegister }) {
       ══════════════════════════════════════ */}
       <section id="trace" style={{ padding:"90px 24px", background:T.bg }}>
         <div style={{ maxWidth:"760px", margin:"0 auto" }}>
-          <SH label="Produce Journey" title="Trace Any Batch" sub="Enter a batch ID and watch the full supply chain journey unfold step by step." dark={dark} />
+          <SH label="Produce Journey" title="Trace Any Batch" sub="Enter a batch ID to see the full farm-to-fork journey pulled live from the Sepolia blockchain." dark={dark} />
 
           {/* input */}
           <div style={{ display:"flex", gap:"12px", marginTop:"44px", marginBottom:"28px", flexWrap:"wrap" }}>
             <input value={batchId} onChange={e => setBatchId(e.target.value)}
-              placeholder="e.g. AC-2041"
+              placeholder="e.g. 1000 or AC-2041"
               style={{ flex:1, minWidth:"160px", padding:"13px 18px", border:`2px solid ${dark?"#2a4a2e":"#c2dfc9"}`, borderRadius:"12px", outline:"none", background: dark?"#1a2e1e":"white", color:T.text, fontFamily:"monospace", fontSize:"15px", fontWeight:"600", transition:"border .2s" }}
               onFocus={e => e.target.style.borderColor="#4caf72"}
-              onBlur={e => e.target.style.borderColor = dark?"#2a4a2e":"#c2dfc9"}
+              onBlur={e  => e.target.style.borderColor = dark?"#2a4a2e":"#c2dfc9"}
               onKeyDown={e => e.key==="Enter" && handleTrace()}
             />
-            <button onClick={handleTrace} disabled={tracing}
-              style={{ background: tracing?"#4b6655":"linear-gradient(135deg,#1a6b3a,#4caf72)", color:"white", border:"none", borderRadius:"12px", padding:"13px 26px", fontSize:"15px", fontWeight:"700", cursor: tracing?"not-allowed":"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", gap:"8px", boxShadow: tracing?"none":"0 4px 16px rgba(26,107,58,.3)" }}>
-              {tracing ? <><span style={{ width:"15px", height:"15px", border:"2px solid rgba(255,255,255,.4)", borderTopColor:"white", borderRadius:"50%", animation:"spin .8s linear infinite", display:"inline-block" }}/>Tracing...</> : "🔍 Trace Batch"}
+            <button onClick={handleTrace}
+              style={{ background:"linear-gradient(135deg,#1a6b3a,#4caf72)", color:"white", border:"none", borderRadius:"12px", padding:"13px 26px", fontSize:"15px", fontWeight:"700", cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", gap:"8px", boxShadow:"0 4px 16px rgba(26,107,58,.3)" }}>
+              🔍 Trace on Blockchain
             </button>
           </div>
 
-          {/* empty state */}
-          {steps.length===0 && !tracing && (
-            <div style={{ background:T.card, border:`2px dashed ${dark?T.border:"#c2dfc9"}`, borderRadius:"18px", padding:"52px", textAlign:"center", color:T.muted }}>
-              <div style={{ fontSize:"48px", marginBottom:"12px", opacity:.4 }}>🔍</div>
-              <div style={{ fontSize:"15px", fontWeight:"600", color:T.text, marginBottom:"6px" }}>Enter a batch ID above</div>
-              <div style={{ fontSize:"13px" }}>Try "AC-2041" for a demo trace</div>
+          {/* info box */}
+          <div style={{ background: dark?"rgba(76,175,114,.08)":"rgba(220,252,231,.5)",
+            border:`1px solid ${dark?"rgba(76,175,114,.2)":"#c2dfc9"}`,
+            borderRadius:"16px", padding:"32px", textAlign:"center", color:T.muted }}>
+            <div style={{ fontSize:"44px", marginBottom:"14px" }}>🔗</div>
+            <div style={{ fontSize:"16px", fontWeight:"700", color:T.text, marginBottom:"8px" }}>Live Blockchain Trace</div>
+            <div style={{ fontSize:"13px", lineHeight:"1.75", maxWidth:"420px", margin:"0 auto" }}>
+              Enter any batch ID and click "Trace on Blockchain" to see the real supply chain journey — farm origin, quality inspection, distributor handoffs and delivery — all pulled live from Sepolia Testnet. No MetaMask needed.
             </div>
-          )}
-
-          {/* timeline */}
-          {(steps.length > 0 || tracing) && (
-            <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:"18px", padding:"28px 28px", boxShadow:"0 4px 24px rgba(0,0,0,.05)" }}>
-              <div style={{ fontWeight:"700", fontSize:"12px", color:"#4caf72", marginBottom:"22px", display:"flex", alignItems:"center", gap:"7px", textTransform:"uppercase", letterSpacing:"1px" }}>
-                <span style={{ width:"7px", height:"7px", borderRadius:"50%", background:"#4caf72", display:"inline-block", animation:"pdot 1.5s infinite" }}/>
-                Batch #{batchId.toUpperCase()} · Full Journey
-              </div>
-              {steps.map((s,i) => (
-                <div key={i} className="trace-row" style={{ display:"flex", gap:"14px", paddingBottom: i<steps.length-1?"22px":"0", position:"relative", animationDelay:`${i*.07}s` }}>
-                  {i < steps.length-1 && <div style={{ position:"absolute", left:"19px", top:"42px", bottom:"0", width:"2px", background:`linear-gradient(180deg,${s.color}44,transparent)` }}/>}
-                  <div style={{ width:"38px", height:"38px", borderRadius:"12px", flexShrink:0, zIndex:1, background:s.bg, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"18px", border:`2px solid ${s.color}40` }}>{s.emoji}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontWeight:"700", fontSize:"13px", color:s.color, marginBottom:"2px" }}>{s.title}</div>
-                    <div style={{ fontSize:"13px", color:T.text, marginBottom:"3px" }}>{s.desc}</div>
-                    <div style={{ fontSize:"11px", color:T.muted, fontFamily:"monospace" }}>{s.time}</div>
-                  </div>
-                  <span style={{ fontSize:"11px", padding:"3px 9px", borderRadius:"20px", background:s.bg, color:s.color, fontWeight:"700", flexShrink:0, height:"fit-content" }}>✓ Verified</span>
-                </div>
+            <div style={{ marginTop:"18px", display:"flex", gap:"10px", justifyContent:"center", flexWrap:"wrap" }}>
+              {["No MetaMask needed","Immutable records","Real-time data"].map(tag => (
+                <span key={tag} style={{ background: dark?"rgba(76,175,114,.15)":"white",
+                  border:`1px solid ${dark?"rgba(76,175,114,.3)":"#c2dfc9"}`,
+                  borderRadius:"20px", padding:"4px 14px", fontSize:"12px",
+                  fontWeight:"600", color:dark?"#4caf72":"#1a3d1f" }}>{tag}</span>
               ))}
-              {tracing && (
-                <div style={{ display:"flex", alignItems:"center", gap:"8px", marginTop:"14px", color:T.muted, fontSize:"13px" }}>
-                  <span style={{ width:"13px", height:"13px", border:"2px solid #4caf72", borderTopColor:"transparent", borderRadius:"50%", animation:"spin .8s linear infinite", display:"inline-block" }}/>
-                  Fetching next step from blockchain...
-                </div>
-              )}
-
-              {/* QR demo when complete */}
-              {steps.length === TRACE_STEPS.length && (
-                <div style={{ marginTop:"22px", paddingTop:"22px", borderTop:`1px solid ${T.border}` }}>
-                  <div style={{ fontSize:"12px", fontWeight:"700", color:"#4caf72", marginBottom:"16px", textTransform:"uppercase", letterSpacing:"1px" }}>QR Trace Demo</div>
-                  <div style={{ display:"flex", gap:"24px", alignItems:"flex-start", flexWrap:"wrap" }}>
-                    <div style={{ background:"white", padding:"12px", borderRadius:"10px", border:`1px solid ${T.border}` }}>
-                      <QRCodeSVG value={`${window.location.origin}/#trace?batch=${batchId}`} size={76} fgColor="#1a6b3a" />
-                      <div style={{ fontSize:"10px", color:"#4b7a5a", textAlign:"center", marginTop:"6px", fontWeight:"600" }}>Scan to trace</div>
-                    </div>
-                    <div style={{ flex:1, minWidth:"200px", background: dark?"#111c14":"#f8fdf8", border:`1px solid ${T.border}`, borderRadius:"10px", padding:"14px 16px" }}>
-                      <div style={{ fontSize:"11px", color:T.muted, marginBottom:"12px" }}>What the customer sees after scanning</div>
-                      {[
-                        { k:"Batch ID",  v:"AC - 2041" },
-                        { k:"Crop",      v:"Tomatoes", c:"#4b7a5a" },
-                        { k:"Farm",      v:"Rajesh Farms, Pune", c:"#4caf72" },
-                        { k:"Harvested", v:"18 May 2025" },
-                        { k:"Verified",  v:"✓ On chain confirmed", c:"#4caf72" },
-                      ].map((row,ri) => (
-                        <div key={ri} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom: ri<4?`1px solid ${dark?"rgba(255,255,255,.05)":"#edf4ee"}`:"none" }}>
-                          <span style={{ fontSize:"12px", color:T.muted }}>{row.k}</span>
-                          <span style={{ fontSize:"12px", fontWeight:"600", color: row.c || T.text }}>{row.v}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
-          )}
+          </div>
         </div>
       </section>
+
+
 
       {/* ══════════════════════════════════════
           IMPACT STATS
@@ -569,17 +570,40 @@ export default function HomePage({ onSignIn, onRegister }) {
       <section ref={statsRef} style={{ padding:"90px 24px", background:T.altBg }}>
         <div style={{ maxWidth:"960px", margin:"0 auto" }}>
           <SH label="Our Impact" title="Numbers that matter" dark={dark} />
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:"20px", marginTop:"44px" }}>
+          {/* Live badge */}
+          <div style={{ display:"flex", justifyContent:"center", marginTop:12, marginBottom:36 }}>
+            <div style={{ display:"inline-flex", alignItems:"center", gap:6, fontSize:11,
+              fontWeight:700, color:"#16a34a", background:dark?"rgba(22,163,74,.12)":"#dcfce7",
+              border:"1px solid #86efac", borderRadius:50, padding:"4px 14px" }}>
+              <span style={{ width:7, height:7, borderRadius:"50%", background:"#16a34a",
+                display:"inline-block", animation:"pdot 1.5s infinite" }}/>
+              Live on Sepolia Testnet · {realStats.batches === null ? "Fetching…" : "Updated just now"}
+            </div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(175px,1fr))", gap:"20px" }}>
             {[
-              { icon:"🌾", val: cBatches.toLocaleString(), label:"Batches registered" },
-              { icon:"⚖️", val: cKg.toLocaleString()+" kg", label:"Produce traced" },
-              { icon:"🔐", val:"99.9%", label:"Tamper-free records" },
-              { icon:"⛓️", val: cTx.toLocaleString(), label:"On-chain transactions" },
+              { icon:"🌾", val: realStats.batches   === null ? "…" : cBatches.toLocaleString(),         label:"Batches registered", sub:"on-chain" },
+              { icon:"⚖️", val: realStats.totalKg   === null ? "…" : cKg.toLocaleString()+" kg",        label:"Produce traced",     sub:"total quantity" },
+              { icon:"🔬", val: realStats.certs      === null ? "…" : realStats.certs.toLocaleString(),  label:"Certs issued",       sub:"quality verified" },
+              { icon:"⛓️", val: realStats.transfers  === null ? "…" : cTx.toLocaleString(),              label:"Transfers logged",   sub:"blockchain txns" },
             ].map((s,i) => (
-              <div key={i} className="hov-lift" style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:"16px", padding:"28px 20px", textAlign:"center" }}>
-                <div style={{ fontSize:"32px", marginBottom:"12px" }}>{s.icon}</div>
-                <div style={{ fontSize:"32px", fontWeight:"800", color: dark?"#4caf72":"#1a3d1f", letterSpacing:"-1px", lineHeight:"1", marginBottom:"8px" }}>{s.val}</div>
-                <div style={{ fontSize:"12px", color:T.muted }}>{s.label}</div>
+              <div key={i} className="hov-lift" style={{ background:T.card, border:`1px solid ${T.border}`,
+                borderRadius:16, padding:"28px 20px", textAlign:"center", position:"relative" }}>
+                <div style={{ fontSize:32, marginBottom:12 }}>{s.icon}</div>
+                <div style={{ fontSize:30, fontWeight:800, color:dark?"#4caf72":"#1a3d1f",
+                  letterSpacing:"-1px", lineHeight:1, marginBottom:6 }}>
+                  {s.val === "…"
+                    ? <span style={{ display:"inline-flex", gap:3 }}>
+                        {[0,1,2].map(j => <span key={j} style={{ width:6,height:6,borderRadius:"50%",
+                          background:dark?"#4caf72":"#1a6b3a", display:"inline-block",
+                          animation:`pdot 1.2s ease ${j*0.2}s infinite` }}/>)}
+                      </span>
+                    : s.val}
+                </div>
+                <div style={{ fontSize:12, fontWeight:700, color:T.text, marginBottom:3 }}>{s.label}</div>
+                <div style={{ fontSize:10, color:T.muted }}>{s.sub}</div>
+                <div style={{ position:"absolute", bottom:0, left:"20%", right:"20%", height:2,
+                  background:"linear-gradient(90deg,transparent,#4caf72,transparent)", borderRadius:1 }}/>
               </div>
             ))}
           </div>

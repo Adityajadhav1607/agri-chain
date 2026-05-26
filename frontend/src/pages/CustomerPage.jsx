@@ -59,8 +59,8 @@ function AnimatedTimelineItem({ item, index, total }) {
   );
 }
 
-export default function CustomerPage() {
-  const [batchId,   setBatchId]   = useState("");
+export default function CustomerPage({ account, initialBatchId }) {
+  const [batchId,   setBatchId]   = useState(initialBatchId || "");
   const [compareBatchId, setCompareBatchId] = useState("");
   const [loading,   setLoading]   = useState(false);
   const [compareLoading, setCompareLoading] = useState(false);
@@ -76,9 +76,16 @@ export default function CustomerPage() {
   const [passport,  setPassport]  = useState(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get("batch");
-    if (id) { setBatchId(id); traceBatchById(id); }
+    // Priority: initialBatchId prop > URL ?batch= param
+    const fromProp = initialBatchId;
+    const params   = new URLSearchParams(window.location.search);
+    const fromUrl  = params.get("batch");
+    const id = fromProp || fromUrl;
+    if (id) {
+      const cleanId = id.toString().trim().replace(/^AC-?/i, "");
+      setBatchId(cleanId);
+      traceBatchById(cleanId);
+    }
   }, []); // eslint-disable-line
 
   async function getContracts() {
@@ -214,7 +221,11 @@ export default function CustomerPage() {
     });
   }
 
-  async function traceBatch() { await traceBatchById(batchId); }
+  async function traceBatch() {
+    const cleanId = batchId.toString().trim().replace(/^AC-?/i, "");
+    setBatchId(cleanId);
+    await traceBatchById(cleanId);
+  }
 
   const qrUrl = `${window.location.origin}?batch=${batchId}`;
 
