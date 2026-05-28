@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import QualityVerifierABI from "../utils/QualityVerifier.json";
 import ProduceRegistryABI from "../utils/ProduceRegistry.json";
@@ -54,6 +54,21 @@ export default function InspectorPage({ account }) {
     try { return JSON.parse(localStorage.getItem("inspector_certs") || "[]"); } catch { return []; }
   });
   const [inputMode, setInputMode] = useState("checklist"); // checklist | scoring
+  const [roleStatus, setRoleStatus] = useState("checking"); // checking | granted | denied
+
+  // Check role on mount
+  useEffect(() => {
+    async function checkRole() {
+      try {
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, provider);
+        const INSPECTOR_HASH = ethers.keccak256(ethers.toUtf8Bytes("INSPECTOR"));
+        const has = await verifier.hasRole(INSPECTOR_HASH, account);
+        setRoleStatus(has ? "granted" : "denied");
+      } catch { setRoleStatus("denied"); }
+    }
+    if (account) checkRole();
+  }, [account]);
 
   const handle = e => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -115,6 +130,18 @@ export default function InspectorPage({ account }) {
       setLoading(true);
       const signer   = await getSigner();
       const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, signer);
+
+      // ── Pre-check: does this wallet have INSPECTOR role? ──────────────
+      const INSPECTOR_HASH = ethers.keccak256(ethers.toUtf8Bytes("INSPECTOR"));
+      const hasInspectorRole = await verifier.hasRole(INSPECTOR_HASH, await signer.getAddress()).catch(() => false);
+      if (!hasInspectorRole) {
+        toastDismiss(tid);
+        toastError("🚫 Inspector role not granted on blockchain. Ask admin to approve your request.");
+        setLoading(false);
+        return;
+      }
+      // ─────────────────────────────────────────────────────────────────
+
       const tx = await verifier.issueCertificate(BigInt(form.batchId), parseInt(form.grade), form.ipfsHash || "", finalRemarks || "");
       toastDismiss(tid);
       toastLoading("Transaction submitted — waiting for block confirmation...");
@@ -150,7 +177,13 @@ export default function InspectorPage({ account }) {
       setForm({ batchId: "", grade: "0", ipfsHash: "", remarks: "" });
       setBatchInfo(null); setCert(null); setChecklist({}); setScores({});
     } catch (e) {
-      toastDismiss(tid); toastError(e.reason || e.message || "Transaction failed.");
+      toastDismiss(tid);
+      const msg = e.reason || e.message || "Transaction failed.";
+      if (msg.toLowerCase().includes("role") || msg.toLowerCase().includes("access") || msg.toLowerCase().includes("missing")) {
+        toastError("🚫 Inspector role not granted. Contact admin to approve your access request.");
+      } else {
+        toastError(msg);
+      }
     } finally { setLoading(false); }
   }
 
@@ -175,6 +208,26 @@ export default function InspectorPage({ account }) {
         .skeleton-line{height:14px;border-radius:6px;background:linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%);background-size:200% 100%}
       `}</style>
       <Confetti active={confetti} />
+
+      {/* ── Role Status Banner ── */}
+      {roleStatus === "denied" && (
+        <div style={{ background:"#fee2e2", border:"1px solid #f87171", borderRadius:10, padding:"14px 18px", marginBottom:16, display:"flex", alignItems:"center", gap:12 }}>
+          <div style={{ fontSize:24 }}>🚫</div>
+          <div>
+            <div style={{ fontWeight:700, fontSize:14, color:"#991b1b" }}>Inspector Role Not Granted on Blockchain</div>
+            <div style={{ fontSize:12, color:"#b91c1c", marginTop:3 }}>
+              Your wallet <span style={{ fontFamily:"monospace" }}>{account?.slice(0,10)}...{account?.slice(-6)}</span> does not have the INSPECTOR role on the QualityVerifier contract.
+              Please submit a <strong>Request Access</strong> form with role "Inspector" and wait for admin approval.
+            </div>
+          </div>
+        </div>
+      )}
+      {roleStatus === "granted" && (
+        <div style={{ background:"#d1fae5", border:"1px solid #4caf72", borderRadius:10, padding:"10px 16px", marginBottom:16, display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ fontSize:18 }}>✅</div>
+          <div style={{ fontSize:13, color:"#065f46", fontWeight:600 }}>Inspector role active on blockchain — you can issue certificates.</div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="stats" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>

@@ -56,6 +56,11 @@ export default function AdminPage({ onBack }) {
   // System analytics (simulated from localStorage)
   const [analytics, setAnalytics] = useState({ batches: 0, transfers: 0, certs: 0 });
 
+  // Blockchain role holders
+  const [chainUsers, setChainUsers]         = useState([]);
+  const [chainLoading, setChainLoading]     = useState(false);
+  const [userSearchQ, setUserSearchQ]       = useState("");
+
   useEffect(() => {
     const raw = localStorage.getItem("agrichain_requests") || "[]";
     setRequests(JSON.parse(raw));
@@ -114,6 +119,67 @@ export default function AdminPage({ onBack }) {
     if (role === "inspector")
       return new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, signer);
     throw new Error("Invalid role");
+  }
+
+  /* ── Load all on-chain role holders by querying RoleGranted events ── */
+  async function loadChainUsers() {
+    setChainLoading(true);
+    try {
+      const provider = new ethers.JsonRpcProvider("https://ethereum-sepolia-rpc.publicnode.com");
+      const registry = new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, provider);
+      const tracker  = new ethers.Contract(TRACKER_ADDRESS,  TrackTransferABI.abi,   provider);
+      const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, provider);
+
+      const ROLE_MAP = [
+        { role: "farmer",      hash: ROLE_HASHES.farmer,      contract: registry },
+        { role: "distributor", hash: ROLE_HASHES.distributor, contract: tracker  },
+        { role: "retailer",    hash: ROLE_HASHES.retailer,    contract: tracker  },
+        { role: "inspector",   hash: ROLE_HASHES.inspector,   contract: verifier },
+      ];
+
+      const seen   = new Set();
+      const result = [];
+
+      for (const { role, hash, contract } of ROLE_MAP) {
+        try {
+          // Query RoleGranted events (filter by role hash)
+          const filter = contract.filters.RoleGranted(hash, null, null);
+          const events = await contract.queryFilter(filter, 0, "latest");
+
+          for (const ev of events) {
+            const addr = ev.args.account.toLowerCase();
+            const key  = `${role}:${addr}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+
+            // Verify still has the role
+            const stillHas = await contract.hasRole(hash, addr).catch(() => false);
+            if (!stillHas) continue;
+
+            // Try to match to a request for name info
+            const storedReqs = JSON.parse(localStorage.getItem("agrichain_requests") || "[]");
+            const req = storedReqs.find(r => r.address?.toLowerCase() === addr && r.role === role);
+
+            result.push({
+              address:  addr,
+              role,
+              name:     req?.name     || "—",
+              location: req?.farmLocation || "—",
+              source:   "blockchain",
+            });
+          }
+        } catch (err) {
+          console.warn(`Could not fetch ${role} events:`, err.message);
+        }
+      }
+
+      setChainUsers(result);
+      if (result.length === 0) toastInfo("No on-chain roles found yet.");
+    } catch (e) {
+      toastError("Failed to load blockchain roles: " + (e.message || ""));
+    } finally {
+      setChainLoading(false);
+    }
   }
 
   function logActivity(message) {
@@ -183,16 +249,20 @@ export default function AdminPage({ onBack }) {
     if (confirmRevoke !== revokeTarget.address.slice(0,6)) {
       toastError("Address confirmation mismatch. Type the first 6 chars of the address."); return;
     }
-    const tid = toastLoading(`Revoking ${revokeTarget.role} from ${revokeTarget.name}...`);
+    const displayName = revokeTarget.name && revokeTarget.name !== "—" ? revokeTarget.name : revokeTarget.address.slice(0,10)+"...";
+    const tid = toastLoading(`Revoking ${revokeTarget.role} from ${displayName}...`);
     try {
       const contract = await getContractForRole(revokeTarget.role);
       const roleHash = ROLE_HASHES[revokeTarget.role];
       const tx = await contract.revokeRole(roleHash, revokeTarget.address);
       await tx.wait();
-      updateRequestStatus(revokeTarget.id, "revoked");
+      // Update localStorage request if exists
+      if (revokeTarget.id) updateRequestStatus(revokeTarget.id, "revoked");
+      // Remove from chain users list
+      setChainUsers(u => u.filter(x => !(x.address === revokeTarget.address && x.role === revokeTarget.role)));
       toastDismiss(tid);
-      toastSuccess(`Role revoked from ${revokeTarget.name}.`);
-      logActivity(`🚫 Revoked ${revokeTarget.role} from ${revokeTarget.name}`);
+      toastSuccess(`🚫 Role revoked from ${displayName}.`);
+      logActivity(`🚫 Revoked ${revokeTarget.role} from ${displayName} (${revokeTarget.address.slice(0,10)}...)`);
       setRevokeTarget(null); setConfirmRevoke("");
     } catch (e) { toastDismiss(tid); toastError(e.reason || e.message); }
   }
@@ -376,34 +446,109 @@ export default function AdminPage({ onBack }) {
         {/* ── USERS TAB ── */}
         {tab === "users" && (
           <div style={{ background:"white", border:"1px solid #e5e1d8", borderRadius:12, overflow:"hidden" }}>
-            <div style={{ padding:"14px 20px", borderBottom:"1px solid #e5e1d8", background:"#fafaf8", display:"flex", gap:12, alignItems:"center" }}>
-              <h2 style={{ fontSize:14, fontWeight:600, margin:0 }}>✅ Approved Users ({approved.length})</h2>
+            {/* Header */}
+            <div style={{ padding:"14px 20px", borderBottom:"1px solid #e5e1d8", background:"#fafaf8", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+              <h2 style={{ fontSize:14, fontWeight:600, margin:0 }}>
+                ⛓️ On-Chain Role Holders
+                {chainUsers.length > 0 && (
+                  <span style={{ marginLeft:8, background:"#1a6b3a", color:"white", borderRadius:"50%", padding:"1px 7px", fontSize:11 }}>{chainUsers.length}</span>
+                )}
+              </h2>
               <input
-                value={searchQuery} onChange={e => setSearch(e.target.value)}
+                value={userSearchQ} onChange={e => setUserSearchQ(e.target.value)}
                 placeholder="Search by name, role, address..."
-                style={{ flex:1, padding:"6px 12px", border:"1px solid #e5e1d8", borderRadius:7, fontSize:12, outline:"none", background:"#fafaf8" }}
+                style={{ flex:1, minWidth:160, padding:"6px 12px", border:"1px solid #e5e1d8", borderRadius:7, fontSize:12, outline:"none", background:"#fafaf8" }}
               />
+              <button onClick={loadChainUsers} disabled={chainLoading}
+                style={{ background:"#1a6b3a", color:"white", border:"none", borderRadius:7, padding:"7px 16px", fontSize:12, cursor:chainLoading?"not-allowed":"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                {chainLoading ? "⏳ Loading..." : "🔄 Load from Blockchain"}
+              </button>
             </div>
-            {filteredApproved.length === 0 ? (
-              <div style={{ padding:28, textAlign:"center", color:"#9ca3af", fontSize:13 }}>No approved users match your search.</div>
-            ) : (
-              filteredApproved.map(req => (
-                <div key={req.id} style={{ padding:"12px 20px", borderBottom:"1px solid #f0ede6", display:"flex", alignItems:"center", gap:12 }}>
-                  <div style={{ fontSize:22 }}>{ROLE_INFO[req.role]?.icon}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontWeight:600, fontSize:13 }}>{req.name}</div>
-                    <div style={{ fontSize:11, color:"#6b7280" }}>{req.farmLocation}</div>
-                    <div style={{ fontSize:10, fontFamily:"monospace", color:"#6b7280" }}>{req.address}</div>
-                  </div>
-                  <span style={{ background:"#e8f5ee", color:"#1a6b3a", padding:"3px 10px", borderRadius:4, fontSize:11 }}>{req.role}</span>
-                  <span style={{ background:"#d1fae5", color:"#065f46", padding:"3px 10px", borderRadius:4, fontSize:11 }}>Active</span>
-                  <button onClick={() => { setRevokeTarget(req); setConfirmRevoke(""); }}
-                    style={{ background:"#fee2e2", color:"#dc2626", border:"1px solid #fca5a5", borderRadius:6, padding:"5px 12px", fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
-                    🚫 Revoke
-                  </button>
-                </div>
-              ))
+
+            {/* Info */}
+            <div style={{ padding:"10px 20px", background:"#eff6ff", borderBottom:"1px solid #dbeafe", fontSize:12, color:"#1e40af" }}>
+              ℹ️ Click <strong>"Load from Blockchain"</strong> to fetch all addresses with active on-chain roles. <strong>Revoke</strong> removes the role from the smart contract permanently.
+            </div>
+
+            {/* Loading */}
+            {chainLoading && (
+              <div style={{ padding:32, textAlign:"center", color:"#6b7280", fontSize:13 }}>
+                <div style={{ fontSize:28, marginBottom:10 }}>⏳</div>
+                Querying blockchain events... this may take a moment.
+              </div>
             )}
+
+            {/* Empty */}
+            {!chainLoading && chainUsers.length === 0 && (
+              <div style={{ padding:40, textAlign:"center" }}>
+                <div style={{ fontSize:40, opacity:.35, marginBottom:10 }}>⛓️</div>
+                <div style={{ fontSize:14, fontWeight:600, color:"#374151", marginBottom:6 }}>No blockchain roles loaded</div>
+                <div style={{ fontSize:12, color:"#9ca3af" }}>Click "Load from Blockchain" to see all active role holders.</div>
+              </div>
+            )}
+
+            {/* Table */}
+            {!chainLoading && chainUsers.length > 0 && (() => {
+              const filtered = chainUsers.filter(u =>
+                !userSearchQ ||
+                u.name?.toLowerCase().includes(userSearchQ.toLowerCase()) ||
+                u.role?.toLowerCase().includes(userSearchQ.toLowerCase()) ||
+                u.address?.toLowerCase().includes(userSearchQ.toLowerCase())
+              );
+              if (filtered.length === 0) return (
+                <div style={{ padding:24, textAlign:"center", color:"#9ca3af", fontSize:13 }}>No users match your search.</div>
+              );
+              return (
+                <div style={{ overflowX:"auto" }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                    <thead>
+                      <tr style={{ background:"#f8f7f2" }}>
+                        {["Role","Name / Location","Wallet Address","Status","Action"].map(h => (
+                          <th key={h} style={{ padding:"10px 16px", textAlign:"left", fontSize:11, fontWeight:600, color:"#6b7280", textTransform:"uppercase", letterSpacing:"0.5px", whiteSpace:"nowrap" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((u, i) => (
+                        <tr key={i} style={{ borderBottom:"1px solid #f0ede6" }}>
+                          <td style={{ padding:"12px 16px" }}>
+                            <span style={{ display:"inline-flex", alignItems:"center", gap:6,
+                              background: (ROLE_INFO[u.role]?.color || "#6b7280")+"18",
+                              color: ROLE_INFO[u.role]?.color || "#6b7280",
+                              padding:"4px 10px", borderRadius:20, fontSize:12, fontWeight:700 }}>
+                              {ROLE_INFO[u.role]?.icon} {u.role.charAt(0).toUpperCase()+u.role.slice(1)}
+                            </span>
+                          </td>
+                          <td style={{ padding:"12px 16px" }}>
+                            <div style={{ fontWeight:600, fontSize:13, color:"#1a2e1a" }}>
+                              {u.name && u.name !== "—" ? u.name : <span style={{ color:"#9ca3af", fontStyle:"italic" }}>Unknown</span>}
+                            </div>
+                            {u.location && u.location !== "—" && <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>{u.location}</div>}
+                          </td>
+                          <td style={{ padding:"12px 16px" }}>
+                            <span style={{ fontFamily:"monospace", fontSize:11, color:"#374151", background:"#f3f4f6", padding:"3px 8px", borderRadius:6 }}>
+                              {u.address.slice(0,10)}...{u.address.slice(-6)}
+                            </span>
+                          </td>
+                          <td style={{ padding:"12px 16px" }}>
+                            <span style={{ background:"#d1fae5", color:"#065f46", padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:700 }}>✓ Active</span>
+                          </td>
+                          <td style={{ padding:"12px 16px" }}>
+                            <button
+                              onClick={() => { setRevokeTarget({ ...u, id: null }); setConfirmRevoke(""); }}
+                              style={{ background:"#fee2e2", color:"#dc2626", border:"1px solid #fca5a5", borderRadius:6, padding:"6px 14px", fontSize:11, cursor:"pointer", fontFamily:"inherit", fontWeight:600, transition:"all 0.2s" }}
+                              onMouseOver={e => e.currentTarget.style.background="#fecaca"}
+                              onMouseOut={e => e.currentTarget.style.background="#fee2e2"}>
+                              🚫 Revoke Role
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </div>
         )}
 
