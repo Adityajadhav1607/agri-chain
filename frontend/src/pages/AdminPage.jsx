@@ -193,13 +193,26 @@ export default function AdminPage({ onBack }) {
     const tid = toastLoading(`Approving ${req.name} as ${req.role}...`);
     try {
       setLoading(l => ({ ...l, [req.id]: true }));
-      const contract  = await getContractForRole(req.role);
-      const roleHash  = ROLE_HASHES[req.role];
-      const alreadyHas = await contract.hasRole(roleHash, req.address);
-      if (!alreadyHas) {
-        const tx = await contract.grantRole(roleHash, req.address);
-        await tx.wait();
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      const signer = await provider.getSigner();
+      const roleHash = ROLE_HASHES[req.role];
+
+      if (req.role === "inspector") {
+        // Inspector needs role on ALL 3 contracts so login + certificate both work
+        const registry = new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, signer);
+        const tracker  = new ethers.Contract(TRACKER_ADDRESS,  TrackTransferABI.abi,   signer);
+        const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, signer);
+        for (const c of [registry, tracker, verifier]) {
+          const has = await c.hasRole(roleHash, req.address).catch(() => false);
+          if (!has) { const tx = await c.grantRole(roleHash, req.address); await tx.wait(); }
+        }
+      } else {
+        const contract = await getContractForRole(req.role);
+        const alreadyHas = await contract.hasRole(roleHash, req.address);
+        if (!alreadyHas) { const tx = await contract.grantRole(roleHash, req.address); await tx.wait(); }
       }
+
       updateRequestStatus(req.id, "approved");
       toastDismiss(tid);
       toastSuccess(`✅ ${req.name} approved as ${req.role}!`);
@@ -207,6 +220,30 @@ export default function AdminPage({ onBack }) {
     } catch (e) {
       toastDismiss(tid); toastError(e.reason || e.message);
     } finally { setLoading(l => ({ ...l, [req.id]: false })); }
+  }
+
+  /* ── Repair: grant inspector role on QualityVerifier for an address that
+     already has it on registry/tracker but is missing it on verifier ── */
+  async function grantInspectorOnVerifier(address) {
+    if (!ethers.isAddress(address)) { toastError("Invalid address"); return; }
+    const tid = toastLoading("Granting INSPECTOR on QualityVerifier...");
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      const signer   = await provider.getSigner();
+      const roleHash = ROLE_HASHES.inspector;
+      // Grant on all 3
+      const registry = new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, signer);
+      const tracker  = new ethers.Contract(TRACKER_ADDRESS,  TrackTransferABI.abi,   signer);
+      const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, signer);
+      for (const c of [registry, tracker, verifier]) {
+        const has = await c.hasRole(roleHash, address).catch(() => false);
+        if (!has) { const tx = await c.grantRole(roleHash, address); await tx.wait(); }
+      }
+      toastDismiss(tid);
+      toastSuccess(`✅ INSPECTOR role granted on all contracts for ${address.slice(0,10)}...`);
+      logActivity(`🔧 Re-granted INSPECTOR on all contracts for ${address.slice(0,10)}...`);
+    } catch (e) { toastDismiss(tid); toastError(e.reason || e.message); }
   }
 
   async function bulkApprove() {
@@ -372,24 +409,46 @@ export default function AdminPage({ onBack }) {
               ))}
               {Object.keys(roleCounts).length === 0 && <div style={{ background:"white", border:"1px solid #e5e1d8", borderRadius:10, padding:24, textAlign:"center", color:"#9ca3af" }}>No approved users yet.</div>}
 
-              {/* Reset Inspector Certs */}
-              <div style={{ background:"white", border:"1px solid #fde047", borderRadius:10, padding:"14px 16px" }}>
-                <div style={{ fontSize:13, fontWeight:600, marginBottom:6, color:"#92400e" }}>🔬 Inspector Role Management</div>
-                <div style={{ fontSize:11, color:"#6b7280", marginBottom:10 }}>
-                  Reset inspector certificate records (local). Inspectors must re-request access. Use blockchain revoke via Requests → Users tab.
+              {/* Inspector Role Management */}
+              <div style={{ background:"white", border:"2px solid #dc2626", borderRadius:10, padding:"14px 16px" }}>
+                <div style={{ fontSize:13, fontWeight:700, marginBottom:4, color:"#991b1b", display:"flex", alignItems:"center", gap:8 }}>
+                  🔧 Fix Inspector Access
+                  <span style={{ background:"#fee2e2", color:"#dc2626", fontSize:10, padding:"2px 7px", borderRadius:20, fontWeight:600 }}>REPAIR TOOL</span>
                 </div>
-                <button
-                  onClick={() => {
-                    if (window.confirm("Reset all local inspector certificate records? This clears the local archive only (not blockchain roles).")) {
-                      localStorage.removeItem("inspector_certs");
-                      setAnalytics(a => ({ ...a, certs: 0 }));
-                      toastSuccess("✅ Inspector cert archive reset.");
-                      logActivity("🔬 Admin reset inspector certificate archive to 0");
-                    }
-                  }}
-                  style={{ background:"#fef9c3", color:"#92400e", border:"1px solid #fde047", borderRadius:7, padding:"7px 14px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
-                  🗑️ Reset Inspector Certs to 0
-                </button>
+                <div style={{ fontSize:11, color:"#6b7280", marginBottom:10 }}>
+                  If an inspector sees <strong>"AccessControl: missing role"</strong>, paste their wallet below and click Grant. 
+                  This grants INSPECTOR role on <em>all 3 contracts</em>.
+                </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <input
+                    id="fix-inspector-addr"
+                    placeholder="0x... inspector wallet address"
+                    style={{ flex:1, padding:"8px 10px", border:"1px solid #f87171", borderRadius:7, fontSize:12, fontFamily:"monospace", outline:"none", background:"#fff5f5" }}
+                  />
+                  <button
+                    onClick={() => {
+                      const addr = document.getElementById("fix-inspector-addr").value.trim();
+                      grantInspectorOnVerifier(addr);
+                    }}
+                    style={{ background:"#dc2626", color:"white", border:"none", borderRadius:7, padding:"8px 14px", fontSize:12, cursor:"pointer", fontFamily:"inherit", fontWeight:600, whiteSpace:"nowrap" }}>
+                    ⚡ Grant Role
+                  </button>
+                </div>
+                <div style={{ marginTop:10, borderTop:"1px solid #fee2e2", paddingTop:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div style={{ fontSize:11, color:"#6b7280" }}>Also clears local cert archive:</div>
+                  <button
+                    onClick={() => {
+                      if (window.confirm("Reset all local inspector certificate records?")) {
+                        localStorage.removeItem("inspector_certs");
+                        setAnalytics(a => ({ ...a, certs: 0 }));
+                        toastSuccess("✅ Inspector cert archive reset.");
+                        logActivity("🔬 Admin reset inspector certificate archive");
+                      }
+                    }}
+                    style={{ background:"#fef9c3", color:"#92400e", border:"1px solid #fde047", borderRadius:7, padding:"5px 12px", fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
+                    🗑️ Reset Certs to 0
+                  </button>
+                </div>
               </div>
             </div>
           </div>
