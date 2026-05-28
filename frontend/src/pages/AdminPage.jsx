@@ -61,13 +61,23 @@ export default function AdminPage({ onBack }) {
   const [chainLoading, setChainLoading]     = useState(false);
   const [userSearchQ, setUserSearchQ]       = useState("");
 
-  useEffect(() => {
+  /* ── read requests from localStorage (called on mount + on demand) ── */
+  function refreshRequests() {
     const raw = localStorage.getItem("agrichain_requests") || "[]";
     setRequests(JSON.parse(raw));
+  }
+
+  useEffect(() => {
+    refreshRequests();
     const certs = JSON.parse(localStorage.getItem("inspector_certs") || "[]");
     setAnalytics({ batches: "—", transfers: "—", certs: certs.length });
-    // Reset inspector_certs to start fresh (admin re-assigns)
-    // localStorage.removeItem("inspector_certs"); // Uncomment to fully reset
+
+    // Refresh requests when another tab writes to localStorage (cross-tab)
+    function onStorage(e) {
+      if (e.key === "agrichain_requests") refreshRequests();
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   async function loadOraclePrices() {
@@ -218,8 +228,14 @@ export default function AdminPage({ onBack }) {
         const tracker  = new ethers.Contract(TRACKER_ADDRESS,  TrackTransferABI.abi,   signer);
         const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, signer);
         for (const c of [registry, tracker, verifier]) {
-          const has = await c.hasRole(roleHash, req.address).catch(() => false);
-          if (!has) { const tx = await c.grantRole(roleHash, req.address); await tx.wait(); }
+          try {
+            const tx = await c.grantRole(roleHash, req.address);
+            await tx.wait();
+          } catch (err) {
+            const msg = (err.reason || err.message || "").toLowerCase();
+            if (msg.includes("already granted") || msg.includes("already")) continue;
+            throw err; // real error — propagate
+          }
         }
       } else {
         const contract = await getContractForRole(req.role);
@@ -251,8 +267,14 @@ export default function AdminPage({ onBack }) {
       const tracker  = new ethers.Contract(TRACKER_ADDRESS,  TrackTransferABI.abi,   signer);
       const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, signer);
       for (const c of [registry, tracker, verifier]) {
-        const has = await c.hasRole(roleHash, address).catch(() => false);
-        if (!has) { const tx = await c.grantRole(roleHash, address); await tx.wait(); }
+        try {
+          const tx = await c.grantRole(roleHash, address);
+          await tx.wait();
+        } catch (err) {
+          const msg = (err.reason || err.message || "").toLowerCase();
+          if (msg.includes("already granted") || msg.includes("already")) continue; // already granted = OK
+          throw err; // real error
+        }
       }
       toastDismiss(tid);
       toastSuccess(`✅ INSPECTOR role granted on all contracts for ${address.slice(0,10)}...`);
@@ -473,19 +495,32 @@ export default function AdminPage({ onBack }) {
           <>
             {/* Pending */}
             <div style={{ background:"white", border:"1px solid #e5e1d8", borderRadius:12, marginBottom:16, overflow:"hidden" }}>
-              <div style={{ padding:"14px 20px", borderBottom:"1px solid #e5e1d8", background:"#fafaf8", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ padding:"14px 20px", borderBottom:"1px solid #e5e1d8", background:"#fafaf8", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
                 <h2 style={{ fontSize:14, fontWeight:600, margin:0 }}>
                   📋 Pending Requests ({pending.length})
                   {pending.length > 0 && <span style={{ marginLeft:8, background:"#dc2626", color:"white", borderRadius:"50%", padding:"1px 6px", fontSize:10 }}>{pending.length}</span>}
                 </h2>
-                {selectedIds.size > 0 && (
-                  <button onClick={bulkApprove} style={{ background:"#1a6b3a", color:"white", border:"none", borderRadius:7, padding:"6px 14px", fontSize:12, cursor:"pointer" }}>
-                    ✅ Approve Selected ({selectedIds.size})
+                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  <button onClick={refreshRequests}
+                    style={{ background:"#f0f9ff", color:"#0369a1", border:"1px solid #bae6fd", borderRadius:7,
+                      padding:"5px 12px", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+                    🔄 Refresh
                   </button>
-                )}
+                  {selectedIds.size > 0 && (
+                    <button onClick={bulkApprove} style={{ background:"#1a6b3a", color:"white", border:"none", borderRadius:7, padding:"6px 14px", fontSize:12, cursor:"pointer" }}>
+                      ✅ Approve Selected ({selectedIds.size})
+                    </button>
+                  )}
+                </div>
               </div>
               {pending.length === 0 ? (
-                <div style={{ padding:28, textAlign:"center", color:"#9ca3af", fontSize:13 }}>No pending requests 🎉</div>
+                <div style={{ padding:28, textAlign:"center", color:"#9ca3af", fontSize:13 }}>
+                  <div>No pending requests 🎉</div>
+                  <button onClick={refreshRequests} style={{ marginTop:10, background:"none", border:"1px solid #d1d5db",
+                    borderRadius:6, padding:"4px 12px", fontSize:11, cursor:"pointer", color:"#6b7280" }}>
+                    🔄 Click to check for new requests
+                  </button>
+                </div>
               ) : (
                 pending.map(req => (
                   <div key={req.id} style={{ padding:"14px 20px", borderBottom:"1px solid #f0ede6", display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>

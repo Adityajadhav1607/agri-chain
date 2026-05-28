@@ -55,6 +55,7 @@ export default function InspectorPage({ account }) {
   });
   const [inputMode, setInputMode] = useState("checklist"); // checklist | scoring
   const [roleStatus, setRoleStatus] = useState("checking"); // checking | granted | denied
+  const [chainSyncing, setChainSyncing] = useState(false);
 
   // Check role on mount — use contract's own INSPECTOR_ROLE constant
   useEffect(() => {
@@ -174,6 +175,51 @@ export default function InspectorPage({ account }) {
         toastError(msg);
       }
     } finally { setLoading(false); }
+  }
+
+  /* ── Sync certificates from blockchain ── */
+  async function syncCertsFromChain() {
+    setChainSyncing(true);
+    const tid = toastLoading("⏳ Querying blockchain for your certificates...");
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, provider);
+      const latest    = await provider.getBlockNumber();
+      const fromBlock = Math.max(0, latest - 99000);
+      const filter    = verifier.filters.CertificateIssued(null, null);
+      const events    = await verifier.queryFilter(filter, fromBlock, "latest");
+      const GRADE_LABELS = ["Grade A", "Grade B", "Grade C", "Rejected"];
+      let added = 0;
+      const merged = [...issuedCerts];
+      for (const ev of events) {
+        const certId = ev.args.certId.toString();
+        if (merged.find(x => x.certId === certId)) continue;
+        try {
+          const c = await verifier.getCertificate(BigInt(certId));
+          if (c.inspector.toLowerCase() !== account.toLowerCase()) continue;
+          merged.push({
+            certId, batchId: c.batchId.toString(),
+            grade: GRADE_LABELS[Number(c.grade)] || "Unknown",
+            passed: c.passed,
+            issuedAt: new Date(Number(c.issuedAt) * 1000).toLocaleDateString(),
+            produceType: "—",
+          });
+          added++;
+        } catch { /* skip */ }
+      }
+      toastDismiss(tid);
+      if (added > 0) {
+        const updated = merged.slice(0, 100);
+        setIssuedCerts(updated);
+        localStorage.setItem("inspector_certs", JSON.stringify(updated));
+        toastSuccess(`✅ Synced ${added} certificate(s) from blockchain!`);
+      } else {
+        toastSuccess("No new certificates found on-chain for your wallet.");
+      }
+    } catch (e) {
+      toastDismiss(tid);
+      toastError("Sync failed: " + (e.reason || e.message || ""));
+    } finally { setChainSyncing(false); }
   }
 
   // Stats
@@ -452,12 +498,21 @@ export default function InspectorPage({ account }) {
         <div className="card fade-up">
           <div className="card-header">
             <h2>📁 My Issued Certificates</h2>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>Pass rate: <strong style={{ color: "#1a6b3a" }}>{passRate}%</strong></div>
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>Pass rate: <strong style={{ color: "#1a6b3a" }}>{passRate}%</strong></div>
+              <button className="btn-outline" style={{ fontSize:11, padding:"4px 12px" }}
+                onClick={syncCertsFromChain} disabled={chainSyncing}>
+                {chainSyncing ? "⏳ Syncing..." : "🔄 Sync from Blockchain"}
+              </button>
+            </div>
           </div>
           {issuedCerts.length === 0 ? (
             <div style={{ padding: "40px", textAlign: "center", color: "#9ca3af" }}>
               <div style={{ fontSize: 32 }}>📁</div>
-              No certificates issued yet in this browser session.
+              <div style={{ marginTop:8, marginBottom:12 }}>No certificates in this browser yet.</div>
+              <button className="btn-outline" style={{ fontSize:12 }} onClick={syncCertsFromChain} disabled={chainSyncing}>
+                {chainSyncing ? "⏳ Syncing..." : "🔄 Fetch My Certificates from Blockchain"}
+              </button>
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>

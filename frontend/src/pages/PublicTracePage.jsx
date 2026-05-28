@@ -361,37 +361,74 @@ export default function PublicTracePage({ initialBatchId = "", onSignIn, onBack,
               </div>
             </div>
 
-            {/* Quality Certificate */}
-            {cert && (
-              <div className="pt-card" style={{ background:T.card, borderColor:T.border, animationDelay:".1s",
-                borderLeft:`4px solid ${cert.passed?"#16a34a":"#ef4444"}` }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10, marginBottom:18 }}>
-                  <h3 style={{ fontSize:16, fontWeight:800, color:T.text }}>🏅 Quality Certificate</h3>
-                  <span style={{ padding:"6px 18px", borderRadius:20, fontSize:13, fontWeight:700,
-                    background:cert.passed?GRADE_BG[cert.grade]:"#fee2e2",
-                    color:cert.passed?GRADE_COLORS[cert.grade]:"#991b1b" }}>
-                    Grade {cert.grade} — {cert.passed ? "PASSED ✓" : "REJECTED ✗"}
-                  </span>
+            {/* Farmer Info Card */}
+            <div className="pt-card" style={{ background:T.card, borderColor:T.border, animationDelay:".08s",
+              borderLeft:"4px solid #16a34a" }}>
+              <h3 style={{ fontSize:16, fontWeight:800, color:T.text, marginBottom:16, display:"flex", alignItems:"center", gap:8 }}>
+                👨‍🌾 Farmer Information
+              </h3>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:14 }}>
+                <div style={{ background:dark?"rgba(255,255,255,.06)":"#f0fdf4", border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 16px" }}>
+                  <div style={{ fontSize:11, color:T.muted, marginBottom:5, textTransform:"uppercase", letterSpacing:".5px" }}>👤 Farmer Name</div>
+                  <div style={{ fontWeight:700, fontSize:15, color:T.text }}>{batchInfo.farmerName || <span style={{ fontStyle:"italic", color:T.muted }}>Not registered</span>}</div>
+                </div>
+                <div style={{ background:dark?"rgba(255,255,255,.06)":"#f0fdf4", border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 16px" }}>
+                  <div style={{ fontSize:11, color:T.muted, marginBottom:5, textTransform:"uppercase", letterSpacing:".5px" }}>📍 Village / Location</div>
+                  <div style={{ fontWeight:700, fontSize:15, color:T.text }}>{batchInfo.farmerVillage || batchInfo.farmLocation}</div>
+                </div>
+                <div style={{ background:dark?"rgba(255,255,255,.06)":"#f0fdf4", border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 16px", gridColumn:"1 / -1" }}>
+                  <div style={{ fontSize:11, color:T.muted, marginBottom:5, textTransform:"uppercase", letterSpacing:".5px" }}>🔗 Verified Wallet Address (Ethereum Blockchain)</div>
+                  <div style={{ fontWeight:600, fontSize:12, color:T.text, fontFamily:"monospace", wordBreak:"break-all",
+                    background:dark?"rgba(0,0,0,.25)":"rgba(0,0,0,.04)", padding:"8px 12px", borderRadius:8 }}>
+                    {batchInfo.farmer}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Quality Certificate Card */}
+            {cert ? (
+              <div className="pt-card" style={{ animationDelay:".1s",
+                border:`2px solid ${cert.passed?"#16a34a":"#ef4444"}`,
+                background: cert.passed ? (dark?"rgba(22,163,74,.1)":"rgba(240,253,244,.8)") : (dark?"rgba(239,68,68,.1)":"rgba(254,242,242,.8)") }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:14, marginBottom:20 }}>
+                  <h3 style={{ fontSize:17, fontWeight:900, color:T.text }}>🏅 Quality Certificate</h3>
+                  <div style={{ display:"flex", alignItems:"center", gap:12, background:cert.passed?"#d1fae5":"#fee2e2",
+                    border:`1px solid ${cert.passed?"#4ade80":"#f87171"}`, borderRadius:14, padding:"10px 20px" }}>
+                    <span style={{ fontSize:36 }}>{cert.passed ? "✅" : "❌"}</span>
+                    <div>
+                      <div style={{ fontWeight:900, fontSize:22, color:cert.passed?"#166534":"#991b1b", lineHeight:1 }}>Grade {cert.grade}</div>
+                      <div style={{ fontWeight:700, fontSize:12, color:cert.passed?"#166534":"#991b1b", marginTop:3 }}>
+                        {cert.passed ? "QUALITY PASSED ✓" : "QUALITY REJECTED ✗"}
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:14 }}>
                   {[
-                    ["Grade",     cert.grade],
-                    ["Result",    cert.passed?"✅ Passed":"❌ Rejected"],
-                    ["Issued",    cert.issuedAt],
-                    ["Inspector", cert.inspector.slice(0,12)+"..."],
+                    ["📅 Issued On",    cert.issuedAt],
+                    ["🔬 Inspector",  cert.inspector.slice(0,10)+"..."+cert.inspector.slice(-6)],
+                    ["📊 Result",     cert.passed ? "✅ Passed" : "❌ Rejected"],
                   ].map(([k,v]) => (
-                    <div key={k}>
+                    <div key={k} style={{ background:dark?"rgba(0,0,0,.2)":"rgba(255,255,255,.8)", borderRadius:10, padding:"12px 14px" }}>
                       <div style={{ fontSize:10, color:T.muted, textTransform:"uppercase", letterSpacing:".5px", marginBottom:4 }}>{k}</div>
-                      <div style={{ fontWeight:600, fontSize:13, color:T.text }}>{v}</div>
+                      <div style={{ fontWeight:700, fontSize:13, color:T.text }}>{v}</div>
                     </div>
                   ))}
                   {cert.remarks && (
-                    <div style={{ gridColumn:"span 4" }}>
-                      <div style={{ fontSize:10, color:T.muted, textTransform:"uppercase", letterSpacing:".5px", marginBottom:4 }}>Remarks</div>
-                      <div style={{ fontWeight:500, fontSize:13, color:T.text }}>{cert.remarks}</div>
+                    <div style={{ gridColumn:"1 / -1", background:dark?"rgba(0,0,0,.2)":"rgba(255,255,255,.8)", borderRadius:10, padding:"14px" }}>
+                      <div style={{ fontSize:10, color:T.muted, textTransform:"uppercase", letterSpacing:".5px", marginBottom:6 }}>📝 Inspector Remarks</div>
+                      <div style={{ fontWeight:600, fontSize:14, color:T.text, lineHeight:1.6 }}>{cert.remarks}</div>
                     </div>
                   )}
                 </div>
+              </div>
+            ) : (
+              <div className="pt-card" style={{ background:T.card, borderColor:T.border, animationDelay:".1s",
+                textAlign:"center", padding:"28px", opacity:.75 }}>
+                <div style={{ fontSize:32, marginBottom:8 }}>🔬</div>
+                <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:4 }}>No Quality Certificate Yet</div>
+                <div style={{ fontSize:12, color:T.muted }}>This batch has not been inspected and certified on-chain yet.</div>
               </div>
             )}
 
