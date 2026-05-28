@@ -46,6 +46,8 @@ export default function AdminPage({ onBack }) {
   });
   const [revokeTarget, setRevokeTarget] = useState(null);
   const [confirmRevoke, setConfirmRevoke] = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [importCode, setImportCode] = useState("");
 
   // Oracle state
   const [oraclePrices, setOraclePrices]   = useState([]);
@@ -335,6 +337,61 @@ export default function AdminPage({ onBack }) {
     localStorage.setItem("agrichain_requests", JSON.stringify(updated));
   }
 
+  function importRequest(base64Code) {
+    if (!base64Code || !base64Code.trim()) {
+      toastError("Please enter a Request Code.");
+      return;
+    }
+    try {
+      const decoded = atob(base64Code.trim());
+      const req = JSON.parse(decoded);
+      if (!req.name || !req.role || !req.address || !req.signature) {
+        throw new Error("Invalid request payload structure.");
+      }
+
+      // Re-create the signed message template
+      const message =
+        `AgriChain Access Request\n\n` +
+        `Role:     ${req.role}\n` +
+        `Name:     ${req.name}\n` +
+        `Location: ${req.farmLocation}\n` +
+        `Wallet:   ${req.address}\n\n` +
+        `\u2139\ufe0f  This is a FREE signature \u2014 no gas or transaction required.`;
+
+      const recovered = ethers.verifyMessage(message, req.signature);
+      if (recovered.toLowerCase() !== req.address.toLowerCase()) {
+        throw new Error("Signature verification failed. Sender address mismatch.");
+      }
+
+      // Read current requests
+      const current = JSON.parse(localStorage.getItem("agrichain_requests") || "[]");
+      const exists = current.some(
+        r => r.address.toLowerCase() === req.address.toLowerCase() && r.role === req.role
+      );
+
+      if (exists) {
+        const existingReq = current.find(
+          r => r.address.toLowerCase() === req.address.toLowerCase() && r.role === req.role
+        );
+        toastInfo(`Request for ${req.name} already exists (Status: ${existingReq.status}).`);
+        return;
+      }
+
+      // Enforce pending status
+      req.status = "pending";
+      req.id = req.id || Date.now();
+      req.createdAt = req.createdAt || new Date().toISOString();
+
+      const updated = [req, ...current];
+      setRequests(updated);
+      localStorage.setItem("agrichain_requests", JSON.stringify(updated));
+      toastSuccess(`📥 Request for ${req.name} imported and verified successfully!`);
+      logActivity(`📥 Imported access request for ${req.name} (${req.role})`);
+    } catch (e) {
+      toastError("Failed to import request: " + (e.message || "Invalid or corrupt code."));
+    }
+  }
+
   async function grantManual() {
     if (!ethers.isAddress(manualForm.address)) { toastError("Invalid address"); return; }
     const tid = toastLoading("Processing role grant...");
@@ -553,6 +610,11 @@ export default function AdminPage({ onBack }) {
                   {pending.length > 0 && <span style={{ marginLeft:8, background:"#dc2626", color:"white", borderRadius:"50%", padding:"1px 6px", fontSize:10 }}>{pending.length}</span>}
                 </h2>
                 <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  <button onClick={() => setShowImport(!showImport)}
+                    style={{ background:"#f0fdf4", color:"#166534", border:"1px solid #bbf7d0", borderRadius:7,
+                      padding:"5px 12px", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+                    📥 Import Request
+                  </button>
                   <button onClick={refreshRequests}
                     style={{ background:"#f0f9ff", color:"#0369a1", border:"1px solid #bae6fd", borderRadius:7,
                       padding:"5px 12px", fontSize:11, fontWeight:600, cursor:"pointer" }}>
@@ -565,6 +627,34 @@ export default function AdminPage({ onBack }) {
                   )}
                 </div>
               </div>
+
+              {showImport && (
+                <div style={{ padding:"16px 20px", background:"#fcfcfb", borderBottom:"1px solid #e5e1d8", animation:"slideDown 0.3s ease" }}>
+                  <h3 style={{ margin:"0 0 4px", fontSize:"12px", fontWeight:"600", color:"#374151" }}>📥 Import Cryptographic Request</h3>
+                  <p style={{ margin:"0 0 12px", fontSize:"11px", color:"#6b7280", lineHeight:"1.4" }}>
+                    Paste the Request Code copied from the success screen here. The admin panel will verify the cryptographic signature to ensure validity.
+                  </p>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <textarea
+                      placeholder="Paste Request Code here..."
+                      value={importCode}
+                      onChange={e => setImportCode(e.target.value)}
+                      style={{ flex:1, height:"46px", padding:"8px 12px", border:"1px solid #d1d5db", borderRadius:7, fontSize:11, outline:"none", fontFamily:"monospace", resize:"none", background:"white" }}
+                    />
+                    <button
+                      onClick={() => {
+                        importRequest(importCode);
+                        setImportCode("");
+                        setShowImport(false);
+                      }}
+                      style={{ background:"#1a6b3a", color:"white", border:"none", borderRadius:7, padding:"0 16px", fontSize:12, fontWeight:"600", cursor:"pointer", fontFamily:"inherit" }}
+                    >
+                      Verify & Import
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {pending.length === 0 ? (
                 <div style={{ padding:28, textAlign:"center", color:"#9ca3af", fontSize:13 }}>
                   <div>No pending requests 🎉</div>

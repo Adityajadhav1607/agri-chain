@@ -9,6 +9,8 @@ export default function RegisterPage({ onBack }) {
   const [loading,   setLoading]   = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error,     setError]     = useState(null);
+  const [regSignature, setRegSignature] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const handle = e => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -61,6 +63,7 @@ export default function RegisterPage({ onBack }) {
         `\u2139\ufe0f  This is a FREE signature \u2014 no gas or transaction required.`;
 
       const signature = await signer.signMessage(message);
+      setRegSignature(signature);
 
       // Save request with signature proof to localStorage
       const existing = JSON.parse(localStorage.getItem("agrichain_requests") || "[]");
@@ -82,6 +85,24 @@ export default function RegisterPage({ onBack }) {
     } finally { setLoading(false); }
   }
 
+  function handleCopyCode() {
+    const payload = {
+      name: form.name,
+      farmLocation: form.farmLocation,
+      phone: form.phone,
+      role: form.role,
+      address: form.address,
+      id: Date.now(),
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      signature: regSignature
+    };
+    const code = btoa(JSON.stringify(payload));
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
   if (submitted) return (
     <div style={{
       minHeight: "100vh", background: "#f4f6f0",
@@ -92,7 +113,8 @@ export default function RegisterPage({ onBack }) {
       <div style={{
         background: "white", borderRadius: "16px",
         padding: "40px", maxWidth: "440px", width: "100%",
-        textAlign: "center", border: "1px solid #e5e1d8"
+        textAlign: "center", border: "1px solid #e5e1d8",
+        boxShadow: "0 4px 20px rgba(0,0,0,0.05)"
       }}>
         <div style={{ fontSize: "52px", marginBottom: "16px" }}>✅</div>
         <h2 style={{ color: "#1a6b3a", marginBottom: "10px" }}>
@@ -105,7 +127,7 @@ export default function RegisterPage({ onBack }) {
         </p>
         <div style={{
           background: "#f8f7f2", borderRadius: "8px",
-          padding: "12px 16px", margin: "20px 0",
+          padding: "12px 16px", margin: "20px 0 15px",
           fontSize: "12px", color: "#374151", textAlign: "left"
         }}>
           <div style={{ marginBottom: "6px" }}>
@@ -118,10 +140,50 @@ export default function RegisterPage({ onBack }) {
             <strong>Wallet:</strong> {form.address}
           </div>
         </div>
+
+        {/* Cryptographic Request Code Sharing Area */}
+        <div style={{
+          borderTop: "1px solid #e5e1d8",
+          paddingTop: "15px",
+          marginTop: "15px",
+          textAlign: "left",
+          marginBottom: "20px"
+        }}>
+          <h4 style={{ margin: "0 0 4px", fontSize: "12px", fontWeight: "600", color: "#374151", display: "flex", alignItems: "center", gap: "5px" }}>
+            🧪 Testing on different browsers/incognito?
+          </h4>
+          <p style={{ margin: "0 0 12px", fontSize: "11px", color: "#6b7280", lineHeight: "1.5" }}>
+            Since request data is stored locally, copy this **Request Code** and paste it into the Admin Panel's import tool to manually import it.
+          </p>
+          <button
+            onClick={handleCopyCode}
+            style={{
+              width: "100%",
+              background: copied ? "#e8f5ee" : "#f3f4f6",
+              color: copied ? "#1a6b3a" : "#374151",
+              border: copied ? "1.5px solid #1a6b3a" : "1px solid #d1d5db",
+              borderRadius: "8px",
+              padding: "10px",
+              fontSize: "12px",
+              fontWeight: "600",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              transition: "all 0.2s"
+            }}
+          >
+            {copied ? "✓ Copied Request Code!" : "📋 Copy Request Code"}
+          </button>
+        </div>
+
         <button onClick={onBack} style={{
           background: "#1a6b3a", color: "white", border: "none",
           borderRadius: "8px", padding: "10px 28px",
-          fontSize: "14px", cursor: "pointer", fontFamily: "inherit"
+          fontSize: "14px", cursor: "pointer", fontFamily: "inherit",
+          width: "100%"
         }}>← Back to Login</button>
       </div>
     </div>
