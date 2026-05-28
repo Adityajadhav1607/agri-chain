@@ -56,16 +56,16 @@ export default function InspectorPage({ account }) {
   const [inputMode, setInputMode] = useState("checklist"); // checklist | scoring
   const [roleStatus, setRoleStatus] = useState("checking"); // checking | granted | denied
 
-  // Check role on mount
+  // Check role on mount — use contract's own INSPECTOR_ROLE constant
   useEffect(() => {
     async function checkRole() {
       try {
         const provider = new ethers.BrowserProvider(window.ethereum);
         const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, provider);
-        const INSPECTOR_HASH = ethers.keccak256(ethers.toUtf8Bytes("INSPECTOR"));
+        const INSPECTOR_HASH = await verifier.INSPECTOR_ROLE();
         const has = await verifier.hasRole(INSPECTOR_HASH, account);
         setRoleStatus(has ? "granted" : "denied");
-      } catch { setRoleStatus("denied"); }
+      } catch { setRoleStatus("unknown"); }
     }
     if (account) checkRole();
   }, [account]);
@@ -130,18 +130,6 @@ export default function InspectorPage({ account }) {
       setLoading(true);
       const signer   = await getSigner();
       const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, signer);
-
-      // ── Pre-check: does this wallet have INSPECTOR role? ──────────────
-      const INSPECTOR_HASH = ethers.keccak256(ethers.toUtf8Bytes("INSPECTOR"));
-      const hasInspectorRole = await verifier.hasRole(INSPECTOR_HASH, await signer.getAddress()).catch(() => false);
-      if (!hasInspectorRole) {
-        toastDismiss(tid);
-        toastError("🚫 Inspector role not granted on blockchain. Ask admin to approve your request.");
-        setLoading(false);
-        return;
-      }
-      // ─────────────────────────────────────────────────────────────────
-
       const tx = await verifier.issueCertificate(BigInt(form.batchId), parseInt(form.grade), form.ipfsHash || "", finalRemarks || "");
       toastDismiss(tid);
       toastLoading("Transaction submitted — waiting for block confirmation...");
@@ -179,8 +167,9 @@ export default function InspectorPage({ account }) {
     } catch (e) {
       toastDismiss(tid);
       const msg = e.reason || e.message || "Transaction failed.";
-      if (msg.toLowerCase().includes("role") || msg.toLowerCase().includes("access") || msg.toLowerCase().includes("missing")) {
-        toastError("🚫 Inspector role not granted. Contact admin to approve your access request.");
+      if (msg.toLowerCase().includes("missing role") || msg.toLowerCase().includes("not admin") || msg.toLowerCase().includes("access")) {
+        toastError("🚫 Inspector role not granted on blockchain. Contact admin to grant your role on QualityVerifier.");
+        setRoleStatus("denied");
       } else {
         toastError(msg);
       }

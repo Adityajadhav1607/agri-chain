@@ -121,7 +121,7 @@ export default function AdminPage({ onBack }) {
     throw new Error("Invalid role");
   }
 
-  /* ── Load all on-chain role holders by querying RoleGranted events ── */
+  /* ── Load all on-chain role holders ── */
   async function loadChainUsers() {
     setChainLoading(true);
     try {
@@ -129,6 +129,10 @@ export default function AdminPage({ onBack }) {
       const registry = new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, provider);
       const tracker  = new ethers.Contract(TRACKER_ADDRESS,  TrackTransferABI.abi,   provider);
       const verifier = new ethers.Contract(VERIFIER_ADDRESS, QualityVerifierABI.abi, provider);
+
+      // Limit block range — Sepolia public RPCs reject queries > ~100k blocks
+      const latest    = await provider.getBlockNumber();
+      const fromBlock = Math.max(0, latest - 99000);
 
       const ROLE_MAP = [
         { role: "farmer",      hash: ROLE_HASHES.farmer,      contract: registry },
@@ -139,42 +143,52 @@ export default function AdminPage({ onBack }) {
 
       const seen   = new Set();
       const result = [];
+      const storedReqs = JSON.parse(localStorage.getItem("agrichain_requests") || "[]");
 
+      // ── Pass 1: Query recent RoleGranted events ──
       for (const { role, hash, contract } of ROLE_MAP) {
         try {
-          // Query RoleGranted events (filter by role hash)
           const filter = contract.filters.RoleGranted(hash, null, null);
-          const events = await contract.queryFilter(filter, 0, "latest");
-
+          const events = await contract.queryFilter(filter, fromBlock, "latest");
           for (const ev of events) {
             const addr = ev.args.account.toLowerCase();
             const key  = `${role}:${addr}`;
             if (seen.has(key)) continue;
             seen.add(key);
-
-            // Verify still has the role
             const stillHas = await contract.hasRole(hash, addr).catch(() => false);
             if (!stillHas) continue;
-
-            // Try to match to a request for name info
-            const storedReqs = JSON.parse(localStorage.getItem("agrichain_requests") || "[]");
             const req = storedReqs.find(r => r.address?.toLowerCase() === addr && r.role === role);
-
-            result.push({
-              address:  addr,
-              role,
-              name:     req?.name     || "—",
-              location: req?.farmLocation || "—",
-              source:   "blockchain",
-            });
+            result.push({ address: addr, role, name: req?.name || "—", location: req?.farmLocation || "—", source: "event" });
           }
         } catch (err) {
-          console.warn(`Could not fetch ${role} events:`, err.message);
+          console.warn(`Event query failed for ${role}:`, err.message);
         }
       }
 
+      // ── Pass 2: Check all localStorage-approved addresses (catches old events outside block range) ──
+      const approvedReqs = storedReqs.filter(r => r.status === "approved" && ROLE_HASHES[r.role]);
+      for (const req of approvedReqs) {
+        const addr = req.address?.toLowerCase();
+        if (!addr) continue;
+        const role = req.role;
+        const key  = `${role}:${addr}`;
+        if (seen.has(key)) continue; // already found via events
+        const { contract, hash } = (() => {
+          if (role === "farmer")      return { contract: registry, hash: ROLE_HASHES.farmer };
+          if (role === "distributor") return { contract: tracker,  hash: ROLE_HASHES.distributor };
+          if (role === "retailer")    return { contract: tracker,  hash: ROLE_HASHES.retailer };
+          if (role === "inspector")   return { contract: verifier, hash: ROLE_HASHES.inspector };
+          return {};
+        })();
+        if (!contract) continue;
+        const stillHas = await contract.hasRole(hash, addr).catch(() => false);
+        if (!stillHas) continue;
+        seen.add(key);
+        result.push({ address: addr, role, name: req.name || "—", location: req.farmLocation || "—", source: "local" });
+      }
+
       setChainUsers(result);
-      if (result.length === 0) toastInfo("No on-chain roles found yet.");
+      toastSuccess(`✅ Found ${result.length} active role holder(s) on-chain.`);
     } catch (e) {
       toastError("Failed to load blockchain roles: " + (e.message || ""));
     } finally {
