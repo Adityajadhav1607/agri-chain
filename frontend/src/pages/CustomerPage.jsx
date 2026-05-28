@@ -119,6 +119,14 @@ export default function CustomerPage({ account, initialBatchId }) {
         harvestDate:   new Date(Number(batch.harvestTimestamp) * 1000).toLocaleDateString(),
         harvestTimestamp: harvestTs,
         status:        Number(batch.status),
+        // Lookup farmer name from localStorage registration
+        farmerName: (() => {
+          try {
+            const reqs = JSON.parse(localStorage.getItem("agrichain_requests") || "[]");
+            const r = reqs.find(x => x.address && x.address.toLowerCase() === batch.farmer.toLowerCase() && x.role === "farmer");
+            return r?.name || null;
+          } catch { return null; }
+        })(),
       };
       setBatchInfo(batchData);
 
@@ -350,13 +358,21 @@ export default function CustomerPage({ account, initialBatchId }) {
                       ["Farm Location", batchInfo.farmLocation],
                       ["Certification", batchInfo.certification],
                       ["Harvest Date",  batchInfo.harvestDate],
-                      ["Farmer Wallet", batchInfo.farmer.slice(0,14) + "..."],
+                      ["Farmer Name",   batchInfo.farmerName || "—"],
                     ].map(([k,v]) => (
                       <div key={k}>
                         <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", marginBottom: 2 }}>{k}</div>
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{v}</div>
                       </div>
                     ))}
+                    {/* Farmer wallet on its own full-width row */}
+                    <div style={{ gridColumn: "span 2" }}>
+                      <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", marginBottom: 2 }}>Farmer Wallet (Blockchain)</div>
+                      <div style={{ fontWeight: 600, fontSize: 11, fontFamily: "monospace", wordBreak: "break-all",
+                        background: "#f0fdf4", padding: "6px 8px", borderRadius: 6, border: "1px solid #bbf7d0" }}>
+                        {batchInfo.farmer}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Freshness */}

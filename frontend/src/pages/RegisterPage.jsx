@@ -25,27 +25,60 @@ export default function RegisterPage({ onBack }) {
 
   async function handleSubmit() {
     if (!form.name || !form.farmLocation || !form.phone || !form.address) {
-      setError("Please fill all fields"); return;
+      setError("Please fill all fields and connect your wallet."); return;
     }
     if (!ethers.isAddress(form.address)) {
-      setError("Invalid wallet address"); return;
+      setError("Invalid wallet address — click Auto-fill to use MetaMask."); return;
+    }
+    if (!window.ethereum) {
+      setError("MetaMask not detected. Please install MetaMask to request access."); return;
     }
     try {
       setLoading(true); setError(null);
-      // Save request to localStorage (in production → send to backend API)
-      const requests = JSON.parse(
-        localStorage.getItem("agrichain_requests") || "[]"
-      );
-      requests.push({
+
+      // Connect MetaMask and get signer
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      const signer  = await provider.getSigner();
+      const signerAddr = await signer.getAddress();
+
+      // Make sure MetaMask wallet matches the entered address
+      if (signerAddr.toLowerCase() !== form.address.toLowerCase()) {
+        setError(
+          "Active MetaMask wallet doesn\u2019t match the address above. " +
+          "Click \ud83e\udd8a Auto-fill to use your current wallet."
+        );
+        return;
+      }
+
+      // Sign a message to prove wallet ownership — this shows the MetaMask popup
+      const message =
+        `AgriChain Access Request\n\n` +
+        `Role:     ${form.role}\n` +
+        `Name:     ${form.name}\n` +
+        `Location: ${form.farmLocation}\n` +
+        `Wallet:   ${form.address}\n\n` +
+        `\u2139\ufe0f  This is a FREE signature \u2014 no gas or transaction required.`;
+
+      const signature = await signer.signMessage(message);
+
+      // Save request with signature proof to localStorage
+      const existing = JSON.parse(localStorage.getItem("agrichain_requests") || "[]");
+      existing.push({
         ...form,
         id:        Date.now(),
         status:    "pending",
         createdAt: new Date().toISOString(),
+        signature, // cryptographic proof the user owns this wallet
       });
-      localStorage.setItem("agrichain_requests", JSON.stringify(requests));
+      localStorage.setItem("agrichain_requests", JSON.stringify(existing));
       setSubmitted(true);
     } catch (e) {
-      setError(e.message);
+      if (e.code === 4001 || (e.message || "").toLowerCase().includes("user rejected")) {
+        setError("Signature cancelled. You must sign the MetaMask message to confirm your request.");
+      } else {
+        setError(e.message || "Submission failed. Please try again.");
+      }
     } finally { setLoading(false); }
   }
 
