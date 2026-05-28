@@ -282,6 +282,37 @@ export default function AdminPage({ onBack }) {
     } catch (e) { toastDismiss(tid); toastError(e.reason || e.message); }
   }
 
+  /* ── CRITICAL FIX: Grant OPERATOR_ROLE to QualityVerifier on ProduceRegistry ──
+     The redeployVerifier.js script missed this step. Without OPERATOR_ROLE on the
+     ProduceRegistry, QualityVerifier._registry.updateStatus() always reverts.
+     This needs to be called ONCE by the admin (deployer wallet). ── */
+  async function fixVerifierOperatorRole() {
+    const tid = toastLoading("⚡ Granting OPERATOR_ROLE to QualityVerifier on ProduceRegistry...");
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      const signer   = await provider.getSigner();
+      const OPERATOR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("OPERATOR"));
+      const registry = new ethers.Contract(REGISTRY_ADDRESS, ProduceRegistryABI.abi, signer);
+      try {
+        const tx = await registry.grantRole(OPERATOR_ROLE, VERIFIER_ADDRESS);
+        await tx.wait();
+      } catch (err) {
+        const msg = (err.reason || err.message || "").toLowerCase();
+        if (msg.includes("already granted") || msg.includes("already")) {
+          toastDismiss(tid);
+          toastSuccess("✅ QualityVerifier already has OPERATOR_ROLE — certificates should work now!");
+          logActivity("🔧 Checked: QualityVerifier already has OPERATOR_ROLE on ProduceRegistry");
+          return;
+        }
+        throw err;
+      }
+      toastDismiss(tid);
+      toastSuccess("✅ OPERATOR_ROLE granted to QualityVerifier! Certificates can now be issued.");
+      logActivity(`⚡ Fixed: OPERATOR_ROLE granted to QualityVerifier (${VERIFIER_ADDRESS.slice(0,10)}...)`);
+    } catch (e) { toastDismiss(tid); toastError(e.reason || e.message); }
+  }
+
   async function bulkApprove() {
     const toApprove = requests.filter(r => selectedIds.has(r.id) && r.status === "pending");
     if (toApprove.length === 0) { toastInfo("No pending requests selected."); return; }
@@ -297,7 +328,9 @@ export default function AdminPage({ onBack }) {
   }
 
   function updateRequestStatus(id, status) {
-    const updated = requests.map(r => r.id === id ? { ...r, status } : r);
+    // Always read fresh from localStorage to avoid losing requests submitted after our last state load
+    const current = JSON.parse(localStorage.getItem("agrichain_requests") || "[]");
+    const updated = current.map(r => r.id === id ? { ...r, status } : r);
     setRequests(updated);
     localStorage.setItem("agrichain_requests", JSON.stringify(updated));
   }
@@ -485,6 +518,25 @@ export default function AdminPage({ onBack }) {
                     🗑️ Reset Certs to 0
                   </button>
                 </div>
+              </div>
+            
+              {/* FIX: Grant OPERATOR_ROLE to QualityVerifier on ProduceRegistry */}
+              <div style={{ background:"#fffbeb", border:"1px solid #fde047", borderRadius:10, padding:16, marginTop:12 }}>
+                <div style={{ fontSize:13, fontWeight:700, marginBottom:4, color:"#78350f", display:"flex", alignItems:"center", gap:8 }}>
+                  ⚡ Fix Certificate Issuing
+                  <span style={{ background:"#fef08a", color:"#78350f", fontSize:10, padding:"2px 7px", borderRadius:20, fontWeight:600 }}>CRITICAL FIX</span>
+                </div>
+                <div style={{ fontSize:11, color:"#6b7280", marginBottom:12, lineHeight:1.6 }}>
+                  <strong>Why certificates fail:</strong> The QualityVerifier contract needs <code>OPERATOR_ROLE</code> on 
+                  ProduceRegistry to update batch status after certification. This was missed when the verifier was redeployed.
+                  Click below to fix it <strong>once</strong> — no address needed.
+                </div>
+                <button
+                  onClick={fixVerifierOperatorRole}
+                  style={{ background:"#d97706", color:"white", border:"none", borderRadius:7,
+                    padding:"9px 18px", fontSize:12, cursor:"pointer", fontFamily:"inherit", fontWeight:700 }}>
+                  ⚡ Grant OPERATOR Role to QualityVerifier (Fix Certs)
+                </button>
               </div>
             </div>
           </div>
