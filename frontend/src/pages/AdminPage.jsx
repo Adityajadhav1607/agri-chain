@@ -61,6 +61,8 @@ export default function AdminPage({ onBack }) {
     setRequests(JSON.parse(raw));
     const certs = JSON.parse(localStorage.getItem("inspector_certs") || "[]");
     setAnalytics({ batches: "—", transfers: "—", certs: certs.length });
+    // Reset inspector_certs to start fresh (admin re-assigns)
+    // localStorage.removeItem("inspector_certs"); // Uncomment to fully reset
   }, []);
 
   async function loadOraclePrices() {
@@ -253,7 +255,7 @@ export default function AdminPage({ onBack }) {
 
         {/* Tabs */}
         <div style={{ marginBottom:"16px", display:"flex", gap:"8px", flexWrap:"wrap" }}>
-          {[["dashboard","📊 Dashboard"],["requests","📋 Requests"],["users","👥 Users"],["grant","⚡ Grant Role"],["oracle","💹 Price Oracle"],["log","📜 Activity Log"]].map(([key,label]) => (
+          {[["dashboard","📊 Dashboard"],["requests","📋 Requests"],["users","👥 Users"],["oracle","💹 Price Oracle"],["log","📜 Activity Log"]].map(([key,label]) => (
             <button key={key}
               style={{
                 padding:"8px 16px", borderRadius:7, fontSize:13, cursor:"pointer", fontFamily:"inherit",
@@ -299,6 +301,26 @@ export default function AdminPage({ onBack }) {
                 </div>
               ))}
               {Object.keys(roleCounts).length === 0 && <div style={{ background:"white", border:"1px solid #e5e1d8", borderRadius:10, padding:24, textAlign:"center", color:"#9ca3af" }}>No approved users yet.</div>}
+
+              {/* Reset Inspector Certs */}
+              <div style={{ background:"white", border:"1px solid #fde047", borderRadius:10, padding:"14px 16px" }}>
+                <div style={{ fontSize:13, fontWeight:600, marginBottom:6, color:"#92400e" }}>🔬 Inspector Role Management</div>
+                <div style={{ fontSize:11, color:"#6b7280", marginBottom:10 }}>
+                  Reset inspector certificate records (local). Inspectors must re-request access. Use blockchain revoke via Requests → Users tab.
+                </div>
+                <button
+                  onClick={() => {
+                    if (window.confirm("Reset all local inspector certificate records? This clears the local archive only (not blockchain roles).")) {
+                      localStorage.removeItem("inspector_certs");
+                      setAnalytics(a => ({ ...a, certs: 0 }));
+                      toastSuccess("✅ Inspector cert archive reset.");
+                      logActivity("🔬 Admin reset inspector certificate archive to 0");
+                    }
+                  }}
+                  style={{ background:"#fef9c3", color:"#92400e", border:"1px solid #fde047", borderRadius:7, padding:"7px 14px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
+                  🗑️ Reset Inspector Certs to 0
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -385,37 +407,6 @@ export default function AdminPage({ onBack }) {
           </div>
         )}
 
-        {/* ── GRANT TAB ── */}
-        {tab === "grant" && (
-          <div style={{ background:"white", border:"1px solid #e5e1d8", borderRadius:12, overflow:"hidden" }}>
-            <div style={{ padding:"14px 20px", borderBottom:"1px solid #e5e1d8", background:"#fafaf8" }}>
-              <h2 style={{ fontSize:14, fontWeight:600, margin:0 }}>⚡ Grant Role Directly</h2>
-            </div>
-            <div style={{ padding:20 }}>
-              <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr auto", gap:10, alignItems:"flex-end" }}>
-                <div>
-                  <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#374151", marginBottom:5 }}>Wallet Address</label>
-                  <input value={manualForm.address} onChange={e => setManual(f => ({ ...f, address: e.target.value }))}
-                    placeholder="0x..." style={{ width:"100%", padding:"9px 12px", border:"1px solid #e5e1d8", borderRadius:7, fontSize:12, fontFamily:"monospace", background:"#fafaf8", outline:"none", boxSizing:"border-box" }} />
-                </div>
-                <div>
-                  <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#374151", marginBottom:5 }}>Role</label>
-                  <select value={manualForm.role} onChange={e => setManual(f => ({ ...f, role: e.target.value }))}
-                    style={{ width:"100%", padding:"9px 12px", border:"1px solid #e5e1d8", borderRadius:7, fontSize:13, fontFamily:"inherit", background:"#fafaf8", outline:"none" }}>
-                    <option value="farmer">🌾 Farmer</option>
-                    <option value="distributor">🚛 Distributor</option>
-                    <option value="retailer">🏪 Retailer</option>
-                    <option value="inspector">🔬 Inspector</option>
-                  </select>
-                </div>
-                <button onClick={grantManual}
-                  style={{ background:"#1a6b3a", color:"white", border:"none", borderRadius:7, padding:"9px 18px", fontSize:13, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
-                  Grant ⬡
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* ── ORACLE TAB ── */}
         {tab === "oracle" && (

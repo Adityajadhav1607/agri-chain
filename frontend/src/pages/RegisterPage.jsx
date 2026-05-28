@@ -129,12 +129,13 @@ export default function RegisterPage({ onBack }) {
             display: "block", fontSize: "12px", fontWeight: "600",
             color: "#374151", marginBottom: "6px"
           }}>Select Role *</label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
             {[
               { value: "farmer",      emoji: "🌾", label: "Farmer" },
               { value: "distributor", emoji: "🚛", label: "Distributor" },
               { value: "retailer",    emoji: "🏪", label: "Retailer" },
               { value: "customer",    emoji: "👤", label: "Customer" },
+              { value: "inspector",   emoji: "🔬", label: "Inspector" },
             ].map(r => (
               <div key={r.value}
                 onClick={() => setForm(f => ({ ...f, role: r.value }))}

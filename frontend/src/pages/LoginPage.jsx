@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { signInWithEthereum, MetaMaskNotFoundError } from "../utils/auth";
+import { signInWithEthereum, MetaMaskNotFoundError, getRoleFromChain } from "../utils/auth";
 
 export default function LoginPage({ onLogin, onRegister, onAdmin, onBack }) {
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState(null);
   const [step,       setStep]       = useState("idle");
   const [noMetaMask, setNoMetaMask] = useState(!window.ethereum);
+  const [adminChecking, setAdminChecking] = useState(false);
+  const [adminDenied,   setAdminDenied]   = useState(false);
 
   const roles = [
     { emoji:"🌾", title:"Farmer",      desc:"Register batches & transfer to distributor", color:"#1a6b3a", bg:"#e8f5ee" },
@@ -36,6 +38,24 @@ export default function LoginPage({ onLogin, onRegister, onAdmin, onBack }) {
       }
       setStep("idle");
     } finally { setLoading(false); }
+  }
+
+  async function handleAdminClick() {
+    if (!window.ethereum) { setNoMetaMask(true); return; }
+    try {
+      setAdminChecking(true); setAdminDenied(false); setError(null);
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      if (!accounts || accounts.length === 0) { setError("Please connect MetaMask first."); return; }
+      const role = await getRoleFromChain(accounts[0]);
+      if (role === "admin") {
+        onAdmin();
+      } else {
+        setAdminDenied(true);
+        setTimeout(() => setAdminDenied(false), 3000);
+      }
+    } catch (e) {
+      setError("Could not verify admin role: " + (e.message || ""));
+    } finally { setAdminChecking(false); }
   }
 
   const stepLabels = {
@@ -153,12 +173,17 @@ export default function LoginPage({ onLogin, onRegister, onAdmin, onBack }) {
           padding:"10px", fontSize:"13px", fontWeight:"500",
           cursor:"pointer", fontFamily:"inherit"
         }}>📋 Request Access</button>
-        <button onClick={onAdmin} style={{
-          flex:1, background:"white", color:"#6b7280",
-          border:"1px solid #e5e1d8", borderRadius:"8px",
+        <button onClick={handleAdminClick} disabled={adminChecking} style={{
+          flex:1, background: adminDenied ? "#fee2e2" : "white",
+          color: adminDenied ? "#991b1b" : "#6b7280",
+          border: adminDenied ? "1px solid #f87171" : "1px solid #e5e1d8",
+          borderRadius:"8px",
           padding:"10px", fontSize:"13px",
-          cursor:"pointer", fontFamily:"inherit"
-        }}>🔧 Admin Panel</button>
+          cursor: adminChecking ? "not-allowed" : "pointer",
+          fontFamily:"inherit", transition:"all 0.2s"
+        }}>
+          {adminChecking ? "⏳ Verifying..." : adminDenied ? "🚫 Not Admin" : "🔧 Admin Panel"}
+        </button>
       </div>
 
       {/* MetaMask Not Installed Banner */}

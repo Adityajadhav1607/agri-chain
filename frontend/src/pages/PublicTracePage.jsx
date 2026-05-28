@@ -86,6 +86,14 @@ export default function PublicTracePage({ initialBatchId = "", onSignIn, onBack,
       const { registry, tracker, verifier } = getContracts();
       const batch = await registry.getBatch(BigInt(rawId));
 
+      // Try to get farmer name from requests stored in localStorage
+      const storedRequests = JSON.parse(localStorage.getItem("agrichain_requests") || "[]");
+      const farmerReq = storedRequests.find(r =>
+        r.address && r.address.toLowerCase() === batch.farmer.toLowerCase() && r.role === "farmer"
+      );
+      const farmerName = farmerReq?.name || null;
+      const farmerVillage = farmerReq?.farmLocation || batch.farmLocation;
+
       const batchData = {
         id:            rawId,
         produceType:   batch.produceType,
@@ -93,6 +101,8 @@ export default function PublicTracePage({ initialBatchId = "", onSignIn, onBack,
         farmLocation:  batch.farmLocation,
         certification: batch.certification,
         farmer:        batch.farmer,
+        farmerName:    farmerName,
+        farmerVillage: farmerVillage,
         harvestDate:   new Date(Number(batch.harvestTimestamp) * 1000).toLocaleDateString("en-IN", { day:"numeric", month:"long", year:"numeric" }),
         status:        Number(batch.status),
       };
@@ -107,6 +117,7 @@ export default function PublicTracePage({ initialBatchId = "", onSignIn, onBack,
         transport: TRANSPORT_LABELS[Number(t.transport)] || "🚛 Road",
         timestamp: new Date(Number(t.timestamp) * 1000).toLocaleString("en-IN"),
         notes:     t.notes,
+        price:     t.price ? (Number(t.price) / 100).toFixed(2) : null,
       }));
       setHistory(hist);
 
@@ -139,15 +150,19 @@ export default function PublicTracePage({ initialBatchId = "", onSignIn, onBack,
   /* timeline steps */
   const steps = batchInfo ? [
     {
-      emoji:"🌾", title:`Farm Origin — ${batchInfo.farmLocation}`,
+      emoji:"🌾",
+      title:`Farm Origin — ${batchInfo.farmLocation}`,
       desc:`${batchInfo.produceType} · ${batchInfo.quantity} kg · Harvested ${batchInfo.harvestDate}`,
-      time:`Farmer: ${batchInfo.farmer.slice(0,10)}...${batchInfo.farmer.slice(-6)}`,
+      time: batchInfo.farmerName
+        ? `👨‍🌾 Farmer: ${batchInfo.farmerName} · Village: ${batchInfo.farmerVillage}`
+        : `Farmer: ${batchInfo.farmer.slice(0,10)}...${batchInfo.farmer.slice(-6)}`,
+      tx:   `Wallet: ${batchInfo.farmer.slice(0,10)}...${batchInfo.farmer.slice(-6)}`,
       color:"#16a34a", bg:"#dcfce7",
     },
     ...history.map((h, i) => ({
-      emoji: i === 0 ? "🔬" : i === 1 ? "🚛" : "🏪",
+      emoji: i === 0 ? "🚛" : i === 1 ? "🚛" : "🏪",
       title: `${h.notes || "Transfer"} — ${h.location}`,
-      desc:  `${h.transport} · Temp ${h.temp}°C`,
+      desc:  `${h.transport} · Temp ${h.temp}°C${h.price ? ` · 💰 ₹${h.price}/kg` : ""}`,
       time:  h.timestamp,
       tx:    `${h.from.slice(0,10)}... → ${h.to.slice(0,10)}...`,
       color: i === 0 ? "#7c3aed" : i === 1 ? "#2563eb" : "#ea580c",
@@ -310,12 +325,13 @@ export default function PublicTracePage({ initialBatchId = "", onSignIn, onBack,
 
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:16 }}>
                 {[
-                  ["🌾 Produce",     batchInfo.produceType],
-                  ["⚖️ Quantity",    batchInfo.quantity + " kg"],
-                  ["📍 Farm Location", batchInfo.farmLocation],
+                  ["🌾 Produce",       batchInfo.produceType],
+                  ["⚖️ Quantity",      batchInfo.quantity + " kg"],
+                  ["📍 Village / Farm", batchInfo.farmerVillage || batchInfo.farmLocation],
                   ["🏷️ Certification", batchInfo.certification],
-                  ["📅 Harvest Date", batchInfo.harvestDate],
-                  ["🔗 Transfers",   history.length + " recorded"],
+                  ["📅 Harvest Date",  batchInfo.harvestDate],
+                  ["🔗 Transfers",     history.length + " recorded"],
+                  ...(batchInfo.farmerName ? [["👨‍🌾 Farmer Name", batchInfo.farmerName]] : []),
                 ].map(([k, v]) => (
                   <div key={k} style={{ background:dark?"rgba(255,255,255,.04)":"#f8fdf8",
                     border:`1px solid ${T.border}`, borderRadius:12, padding:"12px 14px" }}>
